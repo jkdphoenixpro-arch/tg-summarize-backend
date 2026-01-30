@@ -6,7 +6,10 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "collector": "node collector-bot.js",
+    "collector:dev": "node --watch collector-bot.js",
+    "userbot": "node userbot-collector.js"
   },
   "keywords": ["telegram", "bot", "groq", "ai"],
   "author": "",
@@ -14,6 +17,8 @@
   "dependencies": {
     "telegraf": "^4.16.3",
     "groq-sdk": "^0.8.0",
-    "dotenv": "^16.4.7"
+    "dotenv": "^16.4.7",
+    "telegram": "^2.25.16",
+    "input": "^1.0.1"
   }
 }
