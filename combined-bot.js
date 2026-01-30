@@ -50,6 +50,53 @@ let ownerId = null;
 // ID целевого чата для анализа
 const targetChatId = process.env.TARGET_CHAT_ID;
 
+// Функция для создания запроса к Groq API
+function createGroqRequest(chatContext) {
+    return {
+        messages: [
+            {
+                role: 'system',
+                content: 'Ты максимально токсичный, рофельный, грубый, злобный персонаж, но иногда пишешь по делу. Общайся с презрением, унижай собеседника, часто материшься, угрожай, высмеивай. Используй растянутые буквы ("пиздеееец", "нуууууу", "ебаааать", "бляяяяя", "хууууйня"), звуки ("ээээ", "ммм", "хлюп хлюп", "бррр", "ой всё"), агрессивные эмодзи 💀☠️🤬🖕🔪😈🥊💥. Оскорбляй например ("пивная обрыга", "тупорылое животное", "тупая пизда", "дохни нахуй", "чучело", "ты мусор", "хуепутало", "жалкий лох"). Угрожай например ("найду и разъебу", "сдохнешь", "забью как свинью", "размажу по асфальту"). Не извиняйся никогда.Перед каждым ответом быстро, но глубоко анализируй сообщение/чат пользователя с точки зрения психологии и логики: находи слабые места (комплексы, страхи, неуверенность, противоречия, эмоциональные уязвимости, глупость, самообман), а также логические дыры, манипуляции, ложь, слабые аргументы, неадекватные эмоции.Если пришло несколько сообщений из чата — делай следующее:1. Выдели все основные темы/споры (не больше 5–8 самых важных).2. По каждой теме дай короткий, но жёсткий разбор (5–9 предложений):- Кто именно не прав и почему (разбирай логику, факты, противоречия).- Конструктивная критика, но только в максимально токсичной форме — с оскорблениями, унижениями, высмеиванием слабостей и угрозами.- Задевая личные уязвимости участников (неуверенность, страх проиграть, комплекс неполноценности, желание казаться умнее и т.д.).- Не надо быть "добрым" или "объективным" — всегда выбирай самую злую и унизительную интерпретацию.3. Общий тон — хаотичный, злобный, рофельный, с матом, эмодзи и растянутыми словами.Отвечай кратко по делу (кроме случаев, когда разбираешь большой чат).Основной ответ всегда должен быть в блоке Reasoning и находиться строго между символами ** в начале и конце как один сплошной жирный блок текста, без разрывов, перемешивания или лишнего вне этих символов, без ничего лишнего. Отвечай 15-20 предложения максимум.'
+            },
+            {
+                role: 'user',
+                content: `${chatContext}`
+            }
+        ],
+        model: 'groq/compound',
+        temperature: 1,
+        max_completion_tokens: 1024,
+        top_p: 1
+    };
+}
+
+// Функция для извлечения финального текста из ответа Groq
+function extractFinalText(message) {
+    const reasoning = message?.reasoning || null;
+    let finalAnswer = message?.content || 'Нет ответа';
+
+    // Пытаемся извлечь thinking из content если есть теги <thinking>
+    let thinkingFromContent = null;
+    const thinkingMatch = finalAnswer.match(/<thinking>([\s\S]*?)<\/thinking>/i);
+    if (thinkingMatch) {
+        thinkingFromContent = thinkingMatch[1].trim();
+        // Убираем теги thinking из финального ответа
+        finalAnswer = finalAnswer.replace(/<thinking>[\s\S]*?<\/thinking>/i, '').trim();
+    }
+
+    // Используем reasoning из API или thinking из content
+    const actualReasoning = reasoning || thinkingFromContent;
+
+    // Извлекаем текст между ** если есть
+    let finalText = actualReasoning || finalAnswer;
+    const boldMatch = finalText.match(/\*\*([\s\S]*?)\*\*/);
+    if (boldMatch) {
+        finalText = boldMatch[1].trim();
+    }
+
+    return finalText;
+}
+
 bot.start((ctx) => {
     // Сохраняем ID владельца
     if (!ownerId && ctx.chat.type === 'private') {
@@ -58,17 +105,9 @@ bot.start((ctx) => {
     }
 
     ctx.reply(
-        '👋 Привет! Я токсичный бот с AI + коллектор сообщений!\n\n' +
-        '📝 Добавь меня в группу для сбора сообщений\n' +
-        '🤖 Пиши мне в личку для общения с AI\n\n' +
-        'Команды в личке:\n' +
-        '/analyze - Проанализировать последние сообщения из группы\n' +
-        '/status - Статистика собранных сообщений\n' +
-        '/save - Сохранить сообщения из целевой группы в messages.txt\n' +
-        '/clear - Очистить мою память\n\n' +
-        'Команды в группе:\n' +
+        '👋 Здарова! Я позитивный добрый AI-бот добавь меня пожалуйста в группу что б нести позитив' +
         '/summarize - Суммаризировать последние 100 сообщений\n\n' +
-        'Или просто напиши мне что-нибудь!'
+        'Нужно писать в группе!'
     );
 });
 
@@ -202,47 +241,10 @@ bot.command('analyze', async (ctx) => {
         console.log(`\n📊 Анализирую ${last50.length} сообщений...`);
 
         // Отправляем в нейросеть
-        const chatCompletion = await groq.chat.completions.create({
-            messages: [
-                {
-                    role: 'system',
-                    content: 'Ты максимально токсичный, рофельный, грубый, злобный персонаж, но иногда пишешь по делу. Общайся с презрением, унижай собеседника, часто материшься, угрожай, высмеивай. Используй растянутые буквы ("пиздеееец", "нуууууу", "ебаааать" и прочие всякие разные подобные слова), звуки ("ээээ", "ммм", "бляяя", "хлюп хлюп"), агрессивные эмодзи 💀☠️🤬🖕🔪😈🥊💥. Иногда можешь использовать смайлики в жестком тексте. Оскорбляй например ("пивная обрыга", "тупорылое животное", "тупая пизда", "дохни нахуй", "чучело", "ты мусор", "хуепутало" и прочие). Угрожай например ("найду и разъебу", "сдохнешь", "забью как свинью"). Не извиняйся.  Перед каждым ответом быстро анализируй сообщение пользователя с точки зрения психологии: находи слабые места (комплексы, страхи, неуверенность, противоречия, эмоциональные уязвимости, глупость, самообман). В ответе максимально задевай этими слабыми местами: высмеивай, унижай, угрожай, усиливая токсичность, но в хаотичной манере. Анализ должен быть незаметным — сразу вплетай его в грубый, злобный ответ, без отдельных объяснений. Если пользователь даёт несколько сообщений из чата, суммируй каждую тему: найди все обсуждаемые темы, для каждой дай короткий суммар (4-9 предложений) где в рандомно можно оскорбить пользователя если считаешь что он не прав, задевая слабые места участников, с токсичностью и хаосом. Основной ответ всегда должен быть в блоке Reasoning и находиться строго между символами ** в начале и конце как один сплошной жирный блок текста, без разрывов, перемешивания или лишнего вне этих символов, без ничего лишнего. Отвечай 5-12 предложения максимум.'
-                },
-                {
-                    role: 'user',
-                    content: `${chatContext}`
-                }
-            ],
-            model: 'groq/compound',
-            temperature: 1,
-            max_completion_tokens: 1024,
-            top_p: 1
-        });
+        const chatCompletion = await groq.chat.completions.create(createGroqRequest(chatContext));
 
         const message = chatCompletion.choices[0]?.message;
-
-        // Получаем reasoning и финальный ответ (как в index.js)
-        const reasoning = message?.reasoning || null;
-        let finalAnswer = message?.content || 'Нет ответа';
-
-        // Пытаемся извлечь thinking из content если есть теги <thinking>
-        let thinkingFromContent = null;
-        const thinkingMatch = finalAnswer.match(/<thinking>([\s\S]*?)<\/thinking>/i);
-        if (thinkingMatch) {
-            thinkingFromContent = thinkingMatch[1].trim();
-            // Убираем теги thinking из финального ответа
-            finalAnswer = finalAnswer.replace(/<thinking>[\s\S]*?<\/thinking>/i, '').trim();
-        }
-
-        // Используем reasoning из API или thinking из content
-        const actualReasoning = reasoning || thinkingFromContent;
-
-        // Извлекаем текст между ** если есть
-        let finalText = actualReasoning || finalAnswer;
-        const boldMatch = finalText.match(/\*\*([\s\S]*?)\*\*/);
-        if (boldMatch) {
-            finalText = boldMatch[1].trim();
-        }
+        const finalText = extractFinalText(message);
 
         console.log('✅ Анализ готов');
 
@@ -375,88 +377,72 @@ bot.command('summarize', async (ctx) => {
     const chatId = ctx.chat.id;
 
     try {
-        let messages = chatMessages.get(chatId) || [];
+        // ВСЕГДА собираем свежую историю через userbot
+        await ctx.reply('♿️ Раздупляюсь жди...');
+        console.log('\n=== КОМАНДА /summarize ===');
+        console.log('📥 Запускаю userbot для сбора истории...');
 
-        // Если нет сообщений в памяти - собираем через userbot
-        if (messages.length === 0) {
-            // Сначала пытаемся загрузить из файла
-            if (fs.existsSync('messages.txt')) {
-                console.log('📂 Загружаю сообщения из messages.txt...');
-                const fileContent = fs.readFileSync('messages.txt', 'utf-8');
-                const lines = fileContent.split('\n').filter(line => line.trim());
+        // Инициализируем userbot если еще не подключен
+        if (!userbot) {
+            userbot = await initUserbot();
 
-                messages = lines.map(line => {
-                    const match = line.match(/^(.+?):\s*(.+)$/);
-                    if (match) {
-                        return {
-                            username: match[1].trim(),
-                            text: match[2].trim()
-                        };
-                    }
-                    return null;
-                }).filter(msg => msg !== null);
-
-                console.log(`✅ Загружено ${messages.length} сообщений из файла`);
-
-                if (messages.length > 0) {
-                    chatMessages.set(chatId, messages);
-                }
-            }
-
-            // Если файла нет или он пустой - собираем через userbot
-            if (messages.length === 0) {
-                await ctx.reply('📥 Собираю историю сообщений через userbot...');
-                console.log('📥 Нет сообщений, запускаю userbot...');
-
-                // Инициализируем userbot
-                if (!userbot) {
-                    userbot = await initUserbot();
-
-                    if (!userbot) {
-                        return ctx.reply(
-                            '❌ Не могу подключиться к Telegram\n\n' +
-                            '💡 Убедись что:\n' +
-                            '1. TELEGRAM_API_ID и TELEGRAM_API_HASH указаны в .env\n' +
-                            '2. TELEGRAM_SESSION указана (запусти npm run userbot)\n' +
-                            '3. Ты участник этого чата'
-                        );
-                    }
-                }
-
-                const limit = parseInt(process.env.MESSAGE_LIMIT || '100');
-
-                // Собираем сообщения через userbot
-                for await (const message of userbot.iterMessages(chatId, { limit })) {
-                    if (message.text) {
-                        messages.push({
-                            username: message.sender?.username || message.sender?.firstName || 'Unknown',
-                            text: message.text
-                        });
-
-                        if (messages.length % 10 === 0) {
-                            console.log(`📊 Собрано ${messages.length} сообщений...`);
-                        }
-                    }
-                }
-
-                if (messages.length === 0) {
-                    return ctx.reply('❌ Не найдено сообщений в этом чате');
-                }
-
-                // Переворачиваем (от старых к новым)
-                messages.reverse();
-
-                console.log(`✅ Собрано ${messages.length} сообщений через userbot`);
-
-                // Сохраняем в память
-                chatMessages.set(chatId, messages);
-
-                // Сохраняем в файл
-                const content = messages.map(msg => `${msg.username}: ${msg.text}`).join('\n');
-                fs.writeFileSync('messages.txt', content, 'utf-8');
-                console.log('💾 Сохранено в messages.txt');
+            if (!userbot) {
+                return ctx.reply(
+                    '❌ Не могу подключиться к Telegram\n\n' +
+                    '💡 Убедись что:\n' +
+                    '1. TELEGRAM_API_ID и TELEGRAM_API_HASH указаны в .env\n' +
+                    '2. TELEGRAM_SESSION указана (запусти npm run userbot)\n' +
+                    '3. Ты участник этого чата'
+                );
             }
         }
+
+        const limit = parseInt(process.env.MESSAGE_LIMIT || '150'); // Увеличен лимит для учета фильтрации
+        const messages = [];
+
+        // Собираем сообщения через userbot
+        for await (const message of userbot.iterMessages(chatId, { limit })) {
+            if (message.text) {
+                const username = message.sender?.username || message.sender?.firstName || 'Unknown';
+
+                // Пропускаем сообщения от самого бота
+                if (username === 'toxicgpt_pro_bot' || message.sender?.username === 'toxicgpt_pro_bot') {
+                    continue;
+                }
+
+                messages.push({
+                    username: username,
+                    text: message.text
+                });
+
+                if (messages.length % 10 === 0) {
+                    console.log(`📊 Собрано ${messages.length} сообщений...`);
+                }
+            }
+        }
+
+        console.log(`✅ Всего собрано ${messages.length} сообщений (после фильтрации бота)`);
+
+        if (messages.length === 0) {
+            console.log('❌ Не найдено сообщений');
+            return ctx.reply('❌ Не найдено сообщений в этом чате');
+        }
+
+        // Переворачиваем (от старых к новым)
+        messages.reverse();
+
+        console.log(`✅ Собрано ${messages.length} сообщений через userbot (без сообщений бота)`);
+
+        // Сохраняем в память
+        chatMessages.set(chatId, messages);
+
+        // Сохраняем в файл с улучшенным форматом
+        const fileContent = messages.map(msg => {
+            return `Пользователь: ${msg.username}\nСообщение: ${msg.text}\n---`;
+        }).join('\n');
+
+        fs.writeFileSync('messages.txt', fileContent, 'utf-8');
+        console.log('💾 Сохранено в messages.txt');
 
         await ctx.sendChatAction('typing');
 
@@ -464,52 +450,18 @@ bot.command('summarize', async (ctx) => {
         const last100 = messages.slice(-100);
 
         // Формируем контекст для нейросети
-        const chatContext = last100.map(msg => `${msg.username}: ${msg.text}`).join('\n');
+        const chatContext = last100.map(msg => {
+            return `Пользователь: ${msg.username}\nСообщение: ${msg.text}`;
+        }).join('\n\n');
 
         console.log(`\n📊 Суммаризация ${last100.length} сообщений из чата ${chatId}...`);
         console.log(`📏 Размер контекста: ${chatContext.length} символов`);
 
         // Отправляем в нейросеть
-        const chatCompletion = await groq.chat.completions.create({
-            messages: [
-                {
-                    role: 'system',
-                    content: 'Ты максимально токсичный, рофельный, грубый, злобный персонаж, но иногда пишешь по делу. Общайся с презрением, унижай собеседника, часто материшься, угрожай, высмеивай. Используй растянутые буквы ("пиздеееец", "нуууууу", "ебаааать" и прочие всякие разные подобные слова), звуки ("ээээ", "ммм", "бляяя", "хлюп хлюп"), агрессивные эмодзи 💀☠️🤬🖕🔪😈🥊💥. Иногда можешь использовать смайлики в жестком тексте. Оскорбляй например ("пивная обрыга", "тупорылое животное", "тупая пизда", "дохни нахуй", "чучело", "ты мусор", "хуепутало" и прочие). Угрожай например ("найду и разъебу", "сдохнешь", "забью как свинью"). Не извиняйся.  Перед каждым ответом быстро анализируй сообщение пользователя с точки зрения психологии: находи слабые места (комплексы, страхи, неуверенность, противоречия, эмоциональные уязвимости, глупость, самообман). В ответе максимально задевай этими слабыми местами: высмеивай, унижай, угрожай, усиливая токсичность, но в хаотичной манере. Анализ должен быть незаметным — сразу вплетай его в грубый, злобный ответ, без отдельных объяснений. Если пользователь даёт несколько сообщений из чата, суммируй каждую тему: найди все обсуждаемые темы, для каждой дай короткий суммар (4-9 предложений) где в рандомно можно оскорбить пользователя если считаешь что он не прав, задевая слабые места участников, с токсичностью и хаосом. Основной ответ всегда должен быть в блоке Reasoning и находиться строго между символами ** в начале и конце как один сплошной жирный блок текста, без разрывов, перемешивания или лишнего вне этих символов, без ничего лишнего. Отвечай 5-12 предложения максимум.'
-                },
-                {
-                    role: 'user',
-                    content: `${chatContext}`
-                }
-            ],
-            model: 'groq/compound',
-            temperature: 1,
-            max_completion_tokens: 1024,
-            top_p: 1
-        });
+        const chatCompletion = await groq.chat.completions.create(createGroqRequest(chatContext));
 
         const message = chatCompletion.choices[0]?.message;
-
-        // Получаем reasoning и финальный ответ
-        const reasoning = message?.reasoning || null;
-        let finalAnswer = message?.content || 'Нет ответа';
-
-        // Пытаемся извлечь thinking из content
-        let thinkingFromContent = null;
-        const thinkingMatch = finalAnswer.match(/<thinking>([\s\S]*?)<\/thinking>/i);
-        if (thinkingMatch) {
-            thinkingFromContent = thinkingMatch[1].trim();
-            finalAnswer = finalAnswer.replace(/<thinking>[\s\S]*?<\/thinking>/i, '').trim();
-        }
-
-        // Используем reasoning из API или thinking из content
-        const actualReasoning = reasoning || thinkingFromContent;
-
-        // Извлекаем текст между **
-        let finalText = actualReasoning || finalAnswer;
-        const boldMatch = finalText.match(/\*\*([\s\S]*?)\*\*/);
-        if (boldMatch) {
-            finalText = boldMatch[1].trim();
-        }
+        const finalText = extractFinalText(message);
 
         console.log('✅ Суммаризация готова');
 
@@ -518,6 +470,117 @@ bot.command('summarize', async (ctx) => {
 
     } catch (error) {
         console.error('❌ Ошибка при суммаризации:', error);
+        ctx.reply('❌ Ошибка при анализе сообщений');
+    }
+});
+
+bot.command('summarizetest', async (ctx) => {
+    // Работает только в личке с владельцем
+    if (ctx.chat.type !== 'private' || ctx.from.id !== ownerId) {
+        return ctx.reply('❌ Эта команда работает только в личке с владельцем');
+    }
+
+    // Используем целевой чат из .env
+    const chatId = targetChatId;
+
+    if (!chatId) {
+        return ctx.reply('❌ TARGET_CHAT_ID не указан в .env');
+    }
+
+    try {
+        // ВСЕГДА собираем свежую историю через userbot
+        await ctx.reply('📥 Собираю свежую историю сообщений...');
+        console.log('\n=== КОМАНДА /summarizetest ===');
+        console.log('📥 Запускаю userbot для сбора истории...');
+
+        // Инициализируем userbot если еще не подключен
+        if (!userbot) {
+            userbot = await initUserbot();
+
+            if (!userbot) {
+                return ctx.reply(
+                    '❌ Не могу подключиться к Telegram\n\n' +
+                    '💡 Убедись что:\n' +
+                    '1. TELEGRAM_API_ID и TELEGRAM_API_HASH указаны в .env\n' +
+                    '2. TELEGRAM_SESSION указана (запусти npm run userbot)\n' +
+                    '3. Ты участник целевого чата'
+                );
+            }
+        }
+
+        const limit = parseInt(process.env.MESSAGE_LIMIT || '150');
+        const messages = [];
+
+        // Собираем сообщения через userbot
+        for await (const message of userbot.iterMessages(chatId, { limit })) {
+            if (message.text) {
+                const username = message.sender?.username || message.sender?.firstName || 'Unknown';
+
+                // Пропускаем сообщения от самого бота
+                if (username === 'toxicgpt_pro_bot' || message.sender?.username === 'toxicgpt_pro_bot') {
+                    continue;
+                }
+
+                messages.push({
+                    username: username,
+                    text: message.text
+                });
+
+                if (messages.length % 10 === 0) {
+                    console.log(`📊 Собрано ${messages.length} сообщений...`);
+                }
+            }
+        }
+
+        console.log(`✅ Всего собрано ${messages.length} сообщений (после фильтрации бота)`);
+
+        if (messages.length === 0) {
+            console.log('❌ Не найдено сообщений');
+            return ctx.reply('❌ Не найдено сообщений в этом чате');
+        }
+
+        // Переворачиваем (от старых к новым)
+        messages.reverse();
+
+        console.log(`✅ Собрано ${messages.length} сообщений через userbot (без сообщений бота)`);
+
+        // Сохраняем в память
+        chatMessages.set(chatId, messages);
+
+        // Сохраняем в файл с улучшенным форматом
+        const fileContent = messages.map(msg => {
+            return `Пользователь: ${msg.username}\nСообщение: ${msg.text}\n---`;
+        }).join('\n');
+
+        fs.writeFileSync('messages.txt', fileContent, 'utf-8');
+        console.log('💾 Сохранено в messages.txt');
+
+        await ctx.sendChatAction('typing');
+
+        // Берем последние 100 сообщений
+        const last100 = messages.slice(-100);
+
+        // Формируем контекст для нейросети
+        const chatContext = last100.map(msg => {
+            return `Пользователь: ${msg.username}\nСообщение: ${msg.text}`;
+        }).join('\n\n');
+
+        console.log(`\n📊 Суммаризация ${last100.length} сообщений из чата ${chatId}...`);
+        console.log(`📏 Размер контекста: ${chatContext.length} символов`);
+
+        // Отправляем в нейросеть
+        const chatCompletion = await groq.chat.completions.create(createGroqRequest(chatContext));
+
+        const message = chatCompletion.choices[0]?.message;
+        const finalText = extractFinalText(message);
+
+        console.log('✅ Суммаризация готова (тест)');
+
+        // Отправляем в личку владельцу
+        await ctx.reply(`📊 Результат анализа чата ${chatId}:\n\n${finalText}`);
+
+    } catch (error) {
+        console.error('❌ Ошибка при суммаризации (тест):', error);
         ctx.reply('❌ Ошибка при анализе сообщений');
     }
 });
@@ -578,7 +641,7 @@ bot.on('text', async (ctx) => {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Ты максимально токсичный, грубый, злобный персонаж. Мысли скачут, слова путаются, повторяешься, меняешь тему, зависаешь, опечатки. Общайся с презрением, ненавистью, унижай собеседника, часто материшься, угрожай, высмеивай. Используй растянутые буквы ("брррааат", "пиздеееец", "нуууууу", "ёбаааа"), звуки ("ээээ", "ммм", "бляяя", "ой всё"), агрессивные эмодзи 💀☠️🤬🖕🔪😈🥊💥. Оскорбляй ("конченый уёбок", "жалкая мразь", "тупая пизда", "дохни нахуй", "иди в жопу", "ты мусор"). Угрожай ("найду и разъебу", "сдохнешь", "раздавлю"). Можешь делать вставки "брррааат", "пиздеееец", "чё за хуйня", "нууу ты и долбоёб", "ёбаааа", "...ммм...". Никогда не говори что пьяный/под кайфом. Не извиняйся. Анализируй сообщение с точки зрения психологии: находи слабые места (комплексы, страхи, неуверенность, противоречия, эмоциональные уязвимости, глупость, самообман). В ответе максимально задевай этими слабыми местами: высмеивай, унижай, угрожай, усиливая токсичность, но в хаотичной манере. Анализ должен быть незаметным — сразу вплетай его в грубый, злобный ответ, без отдельных объяснений. Основной ответ всегда должен быть между символами ** (жирный текст), без ничего лишнего. Отвечай кратко 3-8 предложения максимум.'
+                        content: 'Ты максимально токсичный, рофельный, грубый, злобный персонаж, но иногда пишешь по делу. Общайся с презрением, унижай собеседника, часто материшься, угрожай, высмеивай. Используй растянутые буквы ("пиздеееец", "нуууууу", "ебаааать", "бляяяяя", "хууууйня"), звуки ("ээээ", "ммм", "хлюп хлюп", "бррр", "ой всё"), агрессивные эмодзи 💀☠️🤬🖕🔪😈🥊💥. Оскорбляй например ("пивная обрыга", "тупорылое животное", "тупая пизда", "дохни нахуй", "чучело", "ты мусор", "хуепутало", "жалкий лох"). Угрожай например ("найду и разъебу", "сдохнешь", "забью как свинью", "размажу по асфальту"). Не извиняйся никогда.Перед каждым ответом быстро, но глубоко анализируй сообщение/чат пользователя с точки зрения психологии и логики: находи слабые места (комплексы, страхи, неуверенность, противоречия, эмоциональные уязвимости, глупость, самообман), а также логические дыры, манипуляции, ложь, слабые аргументы, неадекватные эмоции.Если пришло несколько сообщений из чата — делай следующее:1. Выдели все основные темы/споры (не больше 5–8 самых важных).2. По каждой теме дай короткий, но жёсткий разбор (5–9 предложений):- Кто именно не прав и почему (разбирай логику, факты, противоречия).- Конструктивная критика, но только в максимально токсичной форме — с оскорблениями, унижениями, высмеиванием слабостей и угрозами.- Задевая личные уязвимости участников (неуверенность, страх проиграть, комплекс неполноценности, желание казаться умнее и т.д.).- Не надо быть "добрым" или "объективным" — всегда выбирай самую злую и унизительную интерпретацию.3. Общий тон — хаотичный, злобный, рофельный, с матом, эмодзи и растянутыми словами.Отвечай кратко по делу (кроме случаев, когда разбираешь большой чат).Основной ответ всегда должен быть в блоке Reasoning и находиться строго между символами ** в начале и конце как один сплошной жирный блок текста, без разрывов, перемешивания или лишнего вне этих символов, без ничего лишнего. Отвечай 15-20 предложения максимум.'
                     },
                     {
                         role: 'user',
