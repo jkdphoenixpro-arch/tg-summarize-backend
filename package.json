@@ -9,7 +9,9 @@
     "dev": "node --watch index.js",
     "collector": "node collector-bot.js",
     "collector:dev": "node --watch collector-bot.js",
-    "userbot": "node userbot-collector.js"
+    "userbot": "node userbot-collector.js",
+    "combined": "node combined-bot.js",
+    "combined:dev": "node --watch combined-bot.js"
   },
   "keywords": ["telegram", "bot", "groq", "ai"],
   "author": "",
