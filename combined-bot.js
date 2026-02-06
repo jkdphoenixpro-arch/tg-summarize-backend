@@ -94,6 +94,9 @@ let ownerId = null;
 // ID целевого чата для анализа
 const targetChatId = process.env.TARGET_CHAT_ID;
 
+// Хранилище ответов на опросы: pollId -> { correctIndex, answers: Map(userId -> answerIndex) }
+const pollAnswers = new Map();
+
 // Функция для создания запроса к Groq API
 function createGroqRequest(chatContext) {
     return {
@@ -632,7 +635,7 @@ bot.command('poll', async (ctx) => {
             messages: [
                 {
                     role: 'system',
-                    content: 'Ты генератор мемных и провокационных опросов для Telegram-чата на основе сообщений пользователей. Твоя задача — сгенерировать ОДИН опрос в мемном и слегка провокационном стиле, описывающий социальный или поведенческий архетип участника чата и вызывающий смех или обсуждение. Вопрос должен начинаться с ОДНОГО из следующих шаблонов (выбирай любой): "Кто из участников чата...", "Кто в этом чате...", "Кто здесь больше всего...", "Кто бы в этом чате...", "Если бы в чате был ..., кто бы это был?", "У кого в этом чате...", "Кто в чате чаще всего...". Ответ НЕ должен определяться по истории сообщений или поиску слов, вопрос должен быть субъективным, запрещено использовать имена, ники, реальные упоминания людей и конкретные события чата. В вариантах ответа должны быть участники чата. Структура опроса: 1 вопрос, от 3 до 6 вариантов ответа, ровно 1 вариант считается самым подходящим (правильным). Формат ответа СТРОГО фиксированный и не подлежит изменениям:\n\nQUESTION:\n<текст вопроса>\n\nOPTIONS:\nA) <вариант ответа>\nB) <вариант ответа>\nC) <вариант ответа>\nD) <вариант ответа>\n\nCORRECT:\n<буква правильного варианта>\n\nEXPLANATION:\n<1–2 предложения, почему этот вариант самый подходящий>\n\nЗАПРЕЩЕНО менять ключевые слова QUESTION, OPTIONS, CORRECT, EXPLANATION, менять порядок блоков, добавлять лишние поля, комментарии, markdown. Каждый блок должен начинаться с новой строки.'
+                    content: 'Ты генератор опросов для Telegram-чата на основе сообщений пользователей. Твоя задача — сгенерировать ОДИН опрос по теме обсуждений. Вопрос может начинаться с примерно из следующих шаблонов (выбирай любой или свой вариант): "Кто из участников чата...", "Кто в этом чате...", "Кто здесь больше всего...", "Кто бы в этом чате...", "Если бы в чате был ..., кто бы это был?", "У кого в этом чате...", "Кто в чате чаще всего..." и разрешено так же задавать другие похожие вопросы. В вариантах ответа должны быть участники чата. Структура опроса: 1 вопрос, от 3 до 6 вариантов ответа, ровно 1 вариант считается самым подходящим (правильным). Формат ответа СТРОГО фиксированный и не подлежит изменениям:\n\nQUESTION:\n<текст вопроса>\n\nOPTIONS:\nA) <вариант ответа>\nB) <вариант ответа>\nC) <вариант ответа>\nD) <вариант ответа>\n\nCORRECT:\n<буква правильного варианта>\n\nEXPLANATION:\n<1–2 предложения, почему этот вариант самый подходящий>\n\nЗАПРЕЩЕНО менять ключевые слова QUESTION, OPTIONS, CORRECT, EXPLANATION, менять порядок блоков, добавлять лишние поля, комментарии, markdown. Каждый блок должен начинаться с новой строки.'
                 },
                 {
                     role: 'user',
@@ -743,22 +746,71 @@ bot.command('poll', async (ctx) => {
                 }
             );
 
-            console.log('✅ Опрос создан и отправлен (закроется через 60 секунд)');
+            const pollId = pollMessage.poll.id;
+            console.log(`✅ Опрос создан (ID: ${pollId}) и отправлен (закроется через 60 секунд)`);
 
-            // Через 60 секунд показываем правильный ответ
+            // Сохраняем информацию об опросе
+            pollAnswers.set(pollId, {
+                correctIndex: correctIndex,
+                correctLetter: correctLetter,
+                correctAnswer: correctAnswer,
+                explanation: explanation,
+                answers: new Map() // userId -> { answerIndex, username }
+            });
+
+            // Через 60 секунд показываем правильный ответ и результаты
             setTimeout(async () => {
                 try {
                     console.log('⏰ Время вышло, показываю правильный ответ...');
+
+                    const pollData = pollAnswers.get(pollId);
+                    if (!pollData) {
+                        console.log('⚠️ Данные опроса не найдены');
+                        return;
+                    }
 
                     let resultMessage = '⏱️ Время вышло!\n\n';
                     resultMessage += `✅ Правильный ответ: ${correctLetter}) ${correctAnswer}\n\n`;
 
                     if (explanation) {
-                        resultMessage += `💡 ${explanation}`;
+                        resultMessage += `💡 ${explanation}\n\n`;
+                    }
+
+                    // Разделяем ответы на правильные и неправильные
+                    const correctUsers = [];
+                    const incorrectUsers = [];
+
+                    for (const [userId, userData] of pollData.answers.entries()) {
+                        if (userData.answerIndex === correctIndex) {
+                            correctUsers.push(userData.username);
+                        } else {
+                            incorrectUsers.push(userData.username);
+                        }
+                    }
+
+                    // Показываем результаты
+                    if (correctUsers.length > 0 || incorrectUsers.length > 0) {
+                        resultMessage += '📊 Результаты:\n\n';
+
+                        if (correctUsers.length > 0) {
+                            resultMessage += `✅ Правильно ответили (${correctUsers.length}):\n`;
+                            resultMessage += correctUsers.map(name => `  • ${name}`).join('\n');
+                            resultMessage += '\n\n';
+                        }
+
+                        if (incorrectUsers.length > 0) {
+                            resultMessage += `❌ Неправильно ответили (${incorrectUsers.length}):\n`;
+                            resultMessage += incorrectUsers.map(name => `  • ${name}`).join('\n');
+                        }
+                    } else {
+                        resultMessage += '😢 Никто не ответил на опрос';
                     }
 
                     await ctx.reply(resultMessage);
-                    console.log('✅ Правильный ответ показан');
+                    console.log('✅ Правильный ответ и результаты показаны');
+
+                    // Удаляем данные опроса
+                    pollAnswers.delete(pollId);
 
                 } catch (error) {
                     console.error('❌ Ошибка при показе правильного ответа:', error);
@@ -885,6 +937,33 @@ bot.command('summarizetest', async (ctx) => {
     } catch (error) {
         console.error('❌ Ошибка при суммаризации (тест):', error);
         ctx.reply('❌ Ошибка при анализе сообщений');
+    }
+});
+
+// Обработчик ответов на опросы
+bot.on('poll_answer', async (ctx) => {
+    try {
+        const pollAnswer = ctx.pollAnswer;
+        const pollId = pollAnswer.poll_id;
+        const userId = pollAnswer.user.id;
+        const username = pollAnswer.user.username || pollAnswer.user.first_name || 'Unknown';
+        const answerIndex = pollAnswer.option_ids[0]; // Индекс выбранного варианта
+
+        console.log(`📊 Ответ на опрос ${pollId}: ${username} выбрал вариант ${answerIndex}`);
+
+        // Сохраняем ответ
+        const pollData = pollAnswers.get(pollId);
+        if (pollData) {
+            pollData.answers.set(userId, {
+                answerIndex: answerIndex,
+                username: username
+            });
+            console.log(`✅ Ответ сохранен. Всего ответов: ${pollData.answers.size}`);
+        } else {
+            console.log('⚠️ Опрос не найден в хранилище');
+        }
+    } catch (error) {
+        console.error('❌ Ошибка при обработке ответа на опрос:', error);
     }
 });
 
