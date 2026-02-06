@@ -174,11 +174,12 @@ bot.command('status', async (ctx) => {
     if (chatMessages.size > 0) {
         try {
             let allMessages = [];
+            const saveLimit = parseInt(process.env.MESSAGE_LIMIT || '100');
 
             for (const [chatId, messages] of chatMessages.entries()) {
-                // Берем последние 100 сообщений из каждого чата
-                const last100 = messages.slice(-100);
-                allMessages = allMessages.concat(last100);
+                // Берем последние сообщения из каждого чата согласно MESSAGE_LIMIT
+                const lastMessages = messages.slice(-saveLimit);
+                allMessages = allMessages.concat(lastMessages);
             }
 
             // Формируем содержимое файла
@@ -187,7 +188,7 @@ bot.command('status', async (ctx) => {
             // Сохраняем в файл
             fs.writeFileSync('messages.txt', content, 'utf-8');
 
-            console.log(`💾 Сохранено ${allMessages.length} сообщений в messages.txt`);
+            console.log(`💾 Сохранено ${allMessages.length} сообщений в messages.txt (MESSAGE_LIMIT=${saveLimit})`);
 
             // Отправляем подтверждение
             await ctx.reply(`💾 Сохранено ${allMessages.length} сообщений в messages.txt`);
@@ -460,15 +461,16 @@ bot.command('summarize', async (ctx) => {
 
         await ctx.sendChatAction('typing');
 
-        // Берем последние 100 сообщений
-        const last100 = messages.slice(-100);
+        // Берем количество сообщений для анализа (по умолчанию 100)
+        const analyzeLimit = parseInt(process.env.MESSAGE_LIMIT || '100');
+        const selectedMessages = messages.slice(-analyzeLimit);
 
         // Формируем контекст для нейросети
-        const chatContext = last100.map(msg => {
+        const chatContext = selectedMessages.map(msg => {
             return `Пользователь: ${msg.username}\nСообщение: ${msg.text}`;
         }).join('\n\n');
 
-        console.log(`\n📊 Суммаризация ${last100.length} сообщений из чата ${chatId}...`);
+        console.log(`\n📊 Суммаризация ${selectedMessages.length} сообщений из чата ${chatId} (MESSAGE_LIMIT=${analyzeLimit})...`);
         console.log(`📏 Размер контекста: ${chatContext.length} символов`);
 
         // Отправляем в нейросеть
@@ -485,6 +487,248 @@ bot.command('summarize', async (ctx) => {
     } catch (error) {
         console.error('❌ Ошибка при суммаризации:', error);
         ctx.reply('❌ Ошибка при анализе сообщений');
+    }
+});
+
+bot.command('poll', async (ctx) => {
+    // Работает только в личке с владельцем
+    if (ctx.chat.type !== 'private' || ctx.from.id !== ownerId) {
+        return ctx.reply('❌ Эта команда работает только в личке с владельцем');
+    }
+
+    // Используем целевой чат из .env
+    const chatId = targetChatId;
+
+    if (!chatId) {
+        return ctx.reply('❌ TARGET_CHAT_ID не указан в .env');
+    }
+
+    try {
+        await ctx.sendChatAction('typing');
+        await ctx.reply('🎲 Генерирую мемный опрос...');
+
+        console.log('\n=== КОМАНДА /poll ===');
+        console.log('📥 Запускаю userbot для сбора истории...');
+
+        // Инициализируем userbot если еще не подключен
+        if (!userbot) {
+            userbot = await initUserbot();
+
+            if (!userbot) {
+                return ctx.reply(
+                    '❌ Не могу подключиться к Telegram\n\n' +
+                    '💡 Убедись что:\n' +
+                    '1. TELEGRAM_API_ID и TELEGRAM_API_HASH указаны в .env\n' +
+                    '2. TELEGRAM_SESSION указана (запусти npm run userbot)\n' +
+                    '3. Ты участник целевого чата'
+                );
+            }
+        }
+
+        const limit = parseInt(process.env.MESSAGE_LIMIT || '150');
+        const messages = [];
+
+        // Собираем сообщения через userbot
+        for await (const message of userbot.iterMessages(chatId, { limit })) {
+            if (message.text) {
+                const username = message.sender?.username || message.sender?.firstName || 'Unknown';
+
+                // Пропускаем сообщения от самого бота
+                if (username === 'toxicgpt_pro_bot' || message.sender?.username === 'toxicgpt_pro_bot') {
+                    continue;
+                }
+
+                messages.push({
+                    username: username,
+                    text: message.text
+                });
+
+                if (messages.length % 10 === 0) {
+                    console.log(`📊 Собрано ${messages.length} сообщений...`);
+                }
+            }
+        }
+
+        console.log(`✅ Всего собрано ${messages.length} сообщений (после фильтрации бота)`);
+
+        if (messages.length === 0) {
+            console.log('❌ Не найдено сообщений');
+            return ctx.reply('❌ Не найдено сообщений в этом чате');
+        }
+
+        // Переворачиваем (от старых к новым)
+        messages.reverse();
+
+        console.log(`✅ Собрано ${messages.length} сообщений через userbot`);
+
+        // Сохраняем в память
+        chatMessages.set(chatId, messages);
+
+        // Сохраняем в файл messages.txt для проверки
+        const fileContent = messages.map(msg => {
+            return `Пользователь: ${msg.username}\nСообщение: ${msg.text}\n---`;
+        }).join('\n');
+
+        fs.writeFileSync('messages.txt', fileContent, 'utf-8');
+        console.log('💾 Сохранено в messages.txt');
+
+        // Берем количество сообщений из MESSAGE_LIMIT (по умолчанию 100)
+        const messagesToUse = parseInt(process.env.MESSAGE_LIMIT || '100');
+        const selectedMessages = messages.slice(-messagesToUse);
+
+        // Формируем контекст для нейросети
+        const chatContext = selectedMessages.map(msg => {
+            return `Пользователь: ${msg.username}\nСообщение: ${msg.text}`;
+        }).join('\n\n');
+
+        console.log(`📏 Используется ${selectedMessages.length} сообщений (из MESSAGE_LIMIT=${messagesToUse}), размер контекста: ${chatContext.length} символов`);
+
+        // Запрос к нейросети для генерации опроса
+        const pollRequest = {
+            messages: [
+                {
+                    role: 'system',
+                    content: 'Ты генератор мемных и провокационных опросов для Telegram-чата на основе сообщений пользователей. Твоя задача — сгенерировать ОДИН опрос в мемном и слегка провокационном стиле, описывающий социальный или поведенческий архетип участника чата и вызывающий смех или обсуждение. Вопрос должен начинаться с ОДНОГО из следующих шаблонов (выбирай любой): "Кто из участников чата...", "Кто в этом чате...", "Кто здесь больше всего...", "Кто бы в этом чате...", "Если бы в чате был ..., кто бы это был?", "У кого в этом чате...", "Кто в чате чаще всего...". Ответ НЕ должен определяться по истории сообщений или поиску слов, вопрос должен быть субъективным, запрещено использовать имена, ники, реальные упоминания людей и конкретные события чата. В вариантах ответа должны быть участники чата. Структура опроса: 1 вопрос, от 3 до 6 вариантов ответа, ровно 1 вариант считается самым подходящим (правильным). Формат ответа СТРОГО фиксированный и не подлежит изменениям:\n\nQUESTION:\n<текст вопроса>\n\nOPTIONS:\nA) <вариант ответа>\nB) <вариант ответа>\nC) <вариант ответа>\nD) <вариант ответа>\n\nCORRECT:\n<буква правильного варианта>\n\nEXPLANATION:\n<1–2 предложения, почему этот вариант самый подходящий>\n\nЗАПРЕЩЕНО менять ключевые слова QUESTION, OPTIONS, CORRECT, EXPLANATION, менять порядок блоков, добавлять лишние поля, комментарии, markdown. Каждый блок должен начинаться с новой строки.'
+                },
+                {
+                    role: 'user',
+                    content: `${chatContext}`
+                }
+            ],
+            model: 'groq/compound',
+            temperature: 1,
+            max_completion_tokens: 512,
+            top_p: 1
+        };
+
+        console.log('🤖 Отправляю запрос в нейросеть...');
+
+        const chatCompletion = await groq.chat.completions.create(pollRequest);
+        const message = chatCompletion.choices[0]?.message;
+
+        // Извлекаем ответ нейронки (content)
+        const content = message?.content || null;
+        const reasoning = message?.reasoning || null;
+
+        if (!content) {
+            console.log('⚠️ Нейронка не вернула ответ');
+            return ctx.reply('❌ Нейронка не вернула ответ. Попробуй еще раз.');
+        }
+
+        // Логируем reasoning в консоль для отладки
+        if (reasoning) {
+            console.log('\n=== 🧠 REASONING ОТ НЕЙРОНКИ (ОПРОС) ===');
+            console.log(reasoning);
+            console.log('========================================\n');
+        }
+
+        console.log('\n=== 💬 ОТВЕТ ОТ НЕЙРОНКИ (ОПРОС) ===');
+        console.log(content);
+        console.log('====================================\n');
+
+        // Парсим ответ нейронки
+        try {
+            // Извлекаем вопрос (между QUESTION: и OPTIONS:)
+            const questionMatch = content.match(/QUESTION:\s*\n?\s*(.+?)(?=\n\s*OPTIONS:)/s);
+            const question = questionMatch ? questionMatch[1].trim() : null;
+
+            // Извлекаем варианты ответов (между OPTIONS: и CORRECT:)
+            const optionsMatch = content.match(/OPTIONS:\s*\n?\s*(.+?)(?=\n\s*CORRECT:)/s);
+            const optionsText = optionsMatch ? optionsMatch[1].trim() : null;
+
+            // Парсим варианты построчно (A), B), C), D))
+            const options = [];
+            if (optionsText) {
+                // Разбиваем по переносам строк и ищем варианты
+                const lines = optionsText.split('\n');
+
+                lines.forEach(line => {
+                    const match = line.match(/^([A-Z])\)\s*(.+)$/);
+                    if (match) {
+                        const text = match[2].trim();
+                        if (text) {
+                            options.push(text);
+                        }
+                    }
+                });
+
+                // Если не нашли по строкам, пробуем старый метод (на случай если нейронка не добавила переносы)
+                if (options.length === 0) {
+                    const optionMatches = optionsText.split(/(?=[A-Z]\))/);
+                    optionMatches.forEach(opt => {
+                        const text = opt.replace(/^[A-Z]\)\s*/, '').trim();
+                        if (text) {
+                            options.push(text);
+                        }
+                    });
+                }
+            }
+
+            // Извлекаем правильный ответ
+            const correctMatch = content.match(/CORRECT:\s*\n?\s*([A-Z])/);
+            const correctLetter = correctMatch ? correctMatch[1] : null;
+
+            // Извлекаем объяснение
+            const explanationMatch = content.match(/EXPLANATION:\s*\n?\s*(.+?)$/s);
+            const explanation = explanationMatch ? explanationMatch[1].trim() : null;
+
+            console.log('📊 Парсинг результата:');
+            console.log(`Вопрос: ${question}`);
+            console.log(`Варианты (${options.length}): ${options.join(', ')}`);
+            console.log(`Правильный: ${correctLetter}`);
+            console.log(`Объяснение: ${explanation}`);
+
+            // Проверяем что все данные есть
+            if (!question || options.length < 2) {
+                console.log('⚠️ Не удалось распарсить ответ нейронки');
+                return ctx.reply(`❌ Не удалось распарсить ответ нейронки.\n\nСырой ответ:\n${content}`);
+            }
+
+            // Вычисляем индекс правильного ответа (A=0, B=1, C=2, D=3)
+            const correctIndex = correctLetter ? correctLetter.charCodeAt(0) - 'A'.charCodeAt(0) : null;
+            const correctAnswer = correctIndex !== null && options[correctIndex] ? options[correctIndex] : null;
+
+            // Создаем опрос в Telegram с таймером на 60 секунд
+            const pollMessage = await ctx.replyWithPoll(
+                question,
+                options,
+                {
+                    is_anonymous: false, // Не анонимный опрос
+                    allows_multiple_answers: false, // Один ответ
+                    open_period: 60 // Опрос открыт 60 секунд
+                }
+            );
+
+            console.log('✅ Опрос создан и отправлен (закроется через 60 секунд)');
+
+            // Через 60 секунд показываем правильный ответ
+            setTimeout(async () => {
+                try {
+                    console.log('⏰ Время вышло, показываю правильный ответ...');
+
+                    let resultMessage = '⏱️ Время вышло!\n\n';
+                    resultMessage += `✅ Правильный ответ: ${correctLetter}) ${correctAnswer}\n\n`;
+
+                    if (explanation) {
+                        resultMessage += `💡 ${explanation}`;
+                    }
+
+                    await ctx.reply(resultMessage);
+                    console.log('✅ Правильный ответ показан');
+
+                } catch (error) {
+                    console.error('❌ Ошибка при показе правильного ответа:', error);
+                }
+            }, 60000); // 60 секунд = 60000 миллисекунд
+
+        } catch (parseError) {
+            console.error('❌ Ошибка при парсинге:', parseError);
+            await ctx.reply(`❌ Ошибка при парсинге ответа.\n\nСырой ответ:\n${content}`);
+        }
+
+    } catch (error) {
+        console.error('❌ Ошибка при генерации опроса:', error);
+        ctx.reply('❌ Ошибка при генерации опроса');
     }
 });
 
@@ -571,15 +815,16 @@ bot.command('summarizetest', async (ctx) => {
 
         await ctx.sendChatAction('typing');
 
-        // Берем последние 100 сообщений
-        const last100 = messages.slice(-100);
+        // Берем количество сообщений для анализа (по умолчанию 100)
+        const analyzeLimit = parseInt(process.env.MESSAGE_LIMIT || '100');
+        const selectedMessages = messages.slice(-analyzeLimit);
 
         // Формируем контекст для нейросети
-        const chatContext = last100.map(msg => {
+        const chatContext = selectedMessages.map(msg => {
             return `Пользователь: ${msg.username}\nСообщение: ${msg.text}`;
         }).join('\n\n');
 
-        console.log(`\n📊 Суммаризация ${last100.length} сообщений из чата ${chatId}...`);
+        console.log(`\n📊 Суммаризация ${selectedMessages.length} сообщений из чата ${chatId} (MESSAGE_LIMIT=${analyzeLimit})...`);
         console.log(`📏 Размер контекста: ${chatContext.length} символов`);
 
         // Отправляем в нейросеть
