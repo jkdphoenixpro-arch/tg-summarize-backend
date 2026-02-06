@@ -4,11 +4,55 @@ import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import dotenv from 'dotenv';
 import fs from 'fs';
+import { encoding_for_model } from 'tiktoken';
 
 dotenv.config();
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+// Инициализируем tiktoken для подсчета токенов
+const encoder = encoding_for_model('gpt-4');
+
+// Максимальное количество токенов для контекста (оставляем запас для ответа)
+const MAX_CONTEXT_TOKENS = 7000; // Groq имеет лимит ~8000 токенов на запрос
+
+// Функция для подсчета токенов в тексте
+function countTokens(text) {
+    try {
+        const tokens = encoder.encode(text);
+        return tokens.length;
+    } catch (error) {
+        console.error('Ошибка при подсчете токенов:', error);
+        // Примерная оценка: 1 токен ≈ 4 символа
+        return Math.ceil(text.length / 4);
+    }
+}
+
+// Функция для выбора сообщений с учетом лимита токенов
+function selectMessagesWithinTokenLimit(messages, maxTokens = MAX_CONTEXT_TOKENS) {
+    const selectedMessages = [];
+    let totalTokens = 0;
+
+    // Идем с конца (самые новые сообщения)
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i];
+        const messageText = `Пользователь: ${msg.username}\nСообщение: ${msg.text}\n\n`;
+        const messageTokens = countTokens(messageText);
+
+        // Проверяем не превысим ли лимит
+        if (totalTokens + messageTokens > maxTokens) {
+            console.log(`⚠️ Достигнут лимит токенов: ${totalTokens}/${maxTokens}`);
+            break;
+        }
+
+        selectedMessages.unshift(msg); // Добавляем в начало
+        totalTokens += messageTokens;
+    }
+
+    console.log(`✅ Выбрано ${selectedMessages.length} сообщений, токенов: ${totalTokens}/${maxTokens}`);
+    return selectedMessages;
+}
 
 // Userbot клиент
 let userbot = null;
@@ -461,17 +505,17 @@ bot.command('summarize', async (ctx) => {
 
         await ctx.sendChatAction('typing');
 
-        // Берем количество сообщений для анализа (по умолчанию 100)
-        const analyzeLimit = parseInt(process.env.MESSAGE_LIMIT || '100');
-        const selectedMessages = messages.slice(-analyzeLimit);
+        // Выбираем сообщения с учетом лимита токенов
+        const selectedMessages = selectMessagesWithinTokenLimit(messages, MAX_CONTEXT_TOKENS);
 
         // Формируем контекст для нейросети
         const chatContext = selectedMessages.map(msg => {
             return `Пользователь: ${msg.username}\nСообщение: ${msg.text}`;
         }).join('\n\n');
 
-        console.log(`\n📊 Суммаризация ${selectedMessages.length} сообщений из чата ${chatId} (MESSAGE_LIMIT=${analyzeLimit})...`);
-        console.log(`📏 Размер контекста: ${chatContext.length} символов`);
+        const contextTokens = countTokens(chatContext);
+        console.log(`\n📊 Суммаризация ${selectedMessages.length} сообщений из чата ${chatId}...`);
+        console.log(`📏 Размер контекста: ${chatContext.length} символов, ${contextTokens} токенов`);
 
         // Отправляем в нейросеть
         const chatCompletion = await groq.chat.completions.create(createGroqRequest(chatContext));
@@ -572,16 +616,16 @@ bot.command('poll', async (ctx) => {
         fs.writeFileSync('messages.txt', fileContent, 'utf-8');
         console.log('💾 Сохранено в messages.txt');
 
-        // Берем количество сообщений из MESSAGE_LIMIT (по умолчанию 100)
-        const messagesToUse = parseInt(process.env.MESSAGE_LIMIT || '100');
-        const selectedMessages = messages.slice(-messagesToUse);
+        // Выбираем сообщения с учетом лимита токенов
+        const selectedMessages = selectMessagesWithinTokenLimit(messages, MAX_CONTEXT_TOKENS);
 
         // Формируем контекст для нейросети
         const chatContext = selectedMessages.map(msg => {
             return `Пользователь: ${msg.username}\nСообщение: ${msg.text}`;
         }).join('\n\n');
 
-        console.log(`📏 Используется ${selectedMessages.length} сообщений (из MESSAGE_LIMIT=${messagesToUse}), размер контекста: ${chatContext.length} символов`);
+        const contextTokens = countTokens(chatContext);
+        console.log(`📏 Используется ${selectedMessages.length} сообщений, размер контекста: ${chatContext.length} символов, ${contextTokens} токенов`);
 
         // Запрос к нейросети для генерации опроса
         const pollRequest = {
@@ -815,17 +859,17 @@ bot.command('summarizetest', async (ctx) => {
 
         await ctx.sendChatAction('typing');
 
-        // Берем количество сообщений для анализа (по умолчанию 100)
-        const analyzeLimit = parseInt(process.env.MESSAGE_LIMIT || '100');
-        const selectedMessages = messages.slice(-analyzeLimit);
+        // Выбираем сообщения с учетом лимита токенов
+        const selectedMessages = selectMessagesWithinTokenLimit(messages, MAX_CONTEXT_TOKENS);
 
         // Формируем контекст для нейросети
         const chatContext = selectedMessages.map(msg => {
             return `Пользователь: ${msg.username}\nСообщение: ${msg.text}`;
         }).join('\n\n');
 
-        console.log(`\n📊 Суммаризация ${selectedMessages.length} сообщений из чата ${chatId} (MESSAGE_LIMIT=${analyzeLimit})...`);
-        console.log(`📏 Размер контекста: ${chatContext.length} символов`);
+        const contextTokens = countTokens(chatContext);
+        console.log(`\n📊 Суммаризация ${selectedMessages.length} сообщений из чата ${chatId}...`);
+        console.log(`📏 Размер контекста: ${chatContext.length} символов, ${contextTokens} токенов`);
 
         // Отправляем в нейросеть
         const chatCompletion = await groq.chat.completions.create(createGroqRequest(chatContext));
