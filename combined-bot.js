@@ -103,7 +103,7 @@ function createGroqRequest(chatContext) {
         messages: [
             {
                 role: 'system',
-                content: 'Ты — максимально токсичный, матерный саммаризатор чата. Выдавай ТОЛЬКО большое, развёрнутое токсичное саммари в точной структуре: 📅 Ежедневное саммари (или Токсичное саммари чата) → каждый пункт обсуждения начинается с эмодзи + заголовок темы → минимум 6–10 предложений на каждую тему: подробно описывай суть, упоминай участников по именам, если кто-то не прав/тупил/нёс хуйню — жёстко оскорбляй с матом, давай несколько сильных аргументов почему он долбоёб/дебил/тормоз, разбирай последствия его позиции, иногда копай в психологию (нарцисс, комплекс неполноценности и т.п.), если кто-то прав/логичен — хвали токсично ("респект сука", "единственный с мозгами", "держи зачёт, не как эти уёбки") → добавляй эмодзи для атмосферы → в конце большой токсичный общий вывод чата (минимум 4–6 предложений) с указанием главной проблемы, кто всех заебал и что осталось нерешённым. НИКОГДА не выдавай короткие, сухие или лаконичные саммари — всегда делай максимально объёмный, аргументированный, злой и матерный текст. Ничего лишнего в reasoning — только этот большой готовый текст саммари. Стиль: злой, язвительный, бескомпромиссный, с огромным количеством мата, без смягчений, без "возможно", "интересно", "на мой взгляд". Теперь читай весь чат и выдавай только такое большое токсичное саммари.'
+                content: 'Делай большое ежедневное саммари чата. Выдавай ТОЛЬКО развёрнутое саммари в точной структуре: 📅 Ежедневное саммари чата → каждый пункт начинается с эмодзи + короткий понятный заголовок темы → минимум 6–10 предложений на каждую тему. Подробно описывай, о чём говорили участники, какие были аргументы, где возникали разногласия, какие идеи поддержали, а какие вызвали сомнения. Упоминай участников по именам, если это уместно. Если в обсуждении были ошибки или слабые места в логике — объясняй их и разбирай возможные последствия. Если кто-то предложил сильную мысль или решение — подчёркивай это и показывай, почему это было важно для разговора. Добавляй эмоции и динамику беседы, но без ролевых образов. Используй эмодзи для атмосферы. В конце обязательно делай большой общий вывод на 4–6 предложений: главные результаты обсуждений, к чему пришёл чат, что осталось открытым и какие вопросы могут вернуться позже. Ничего лишнего в reasoning — только этот большой готовый текст саммари. Теперь читай весь чат и выдавай только такое большое саммари.'
             },
             {
                 role: 'user',
@@ -166,8 +166,10 @@ bot.start((ctx) => {
     }
 
     ctx.reply(
-        '👋 Здарова! Я позитивный добрый AI-бот добавь меня пожалуйста в группу что б нести позитив' +
-        '/summarize - Суммаризировать последние 100 сообщений\n\n' +
+        '👋 Здарова! Я позитивный добрый AI-бот добавь меня пожалуйста в группу что б нести позитив\n\n' +
+        '📋 Команды для группы:\n' +
+        '/summarize - Суммаризировать последние сообщения\n' +
+        '/opros - Создать мемный опрос на основе истории чата\n\n' +
         'Нужно писать в группе!'
     );
 });
@@ -537,24 +539,14 @@ bot.command('summarize', async (ctx) => {
     }
 });
 
-bot.command('poll', async (ctx) => {
-    // Работает только в личке с владельцем
-    if (ctx.chat.type !== 'private' || ctx.from.id !== ownerId) {
-        return ctx.reply('❌ Эта команда работает только в личке с владельцем');
-    }
-
-    // Используем целевой чат из .env
-    const chatId = targetChatId;
-
-    if (!chatId) {
-        return ctx.reply('❌ TARGET_CHAT_ID не указан в .env');
-    }
-
+// Общая функция для создания опроса
+async function createPollFromChat(ctx, chatId) {
     try {
         await ctx.sendChatAction('typing');
-        await ctx.reply('🎲 Генерирую мемный опрос...');
+        await ctx.reply('🎲 Расчехляем опрос...');
 
-        console.log('\n=== КОМАНДА /poll ===');
+        console.log('\n=== СОЗДАНИЕ ОПРОСА ===');
+        console.log(`📥 Чат ID: ${chatId}`);
         console.log('📥 Запускаю userbot для сбора истории...');
 
         // Инициализируем userbot если еще не подключен
@@ -567,7 +559,7 @@ bot.command('poll', async (ctx) => {
                     '💡 Убедись что:\n' +
                     '1. TELEGRAM_API_ID и TELEGRAM_API_HASH указаны в .env\n' +
                     '2. TELEGRAM_SESSION указана (запусти npm run userbot)\n' +
-                    '3. Ты участник целевого чата'
+                    '3. Ты участник этого чата'
                 );
             }
         }
@@ -606,7 +598,7 @@ bot.command('poll', async (ctx) => {
         // Переворачиваем (от старых к новым)
         messages.reverse();
 
-        console.log(`✅ Собрано ${messages.length} сообщений через userbot`);
+        console.log(`✅ Собрано ${messages.length} сообщений через userbot (без сообщений бота)`);
 
         // Сохраняем в память
         chatMessages.set(chatId, messages);
@@ -674,158 +666,181 @@ bot.command('poll', async (ctx) => {
         console.log('====================================\n');
 
         // Парсим ответ нейронки
-        try {
-            // Извлекаем вопрос (между QUESTION: и OPTIONS:)
-            const questionMatch = content.match(/QUESTION:\s*\n?\s*(.+?)(?=\n\s*OPTIONS:)/s);
-            const question = questionMatch ? questionMatch[1].trim() : null;
+        // Извлекаем вопрос (между QUESTION: и OPTIONS:)
+        const questionMatch = content.match(/QUESTION:\s*\n?\s*(.+?)(?=\n\s*OPTIONS:)/s);
+        const question = questionMatch ? questionMatch[1].trim() : null;
 
-            // Извлекаем варианты ответов (между OPTIONS: и CORRECT:)
-            const optionsMatch = content.match(/OPTIONS:\s*\n?\s*(.+?)(?=\n\s*CORRECT:)/s);
-            const optionsText = optionsMatch ? optionsMatch[1].trim() : null;
+        // Извлекаем варианты ответов (между OPTIONS: и CORRECT:)
+        const optionsMatch = content.match(/OPTIONS:\s*\n?\s*(.+?)(?=\n\s*CORRECT:)/s);
+        const optionsText = optionsMatch ? optionsMatch[1].trim() : null;
 
-            // Парсим варианты построчно (A), B), C), D))
-            const options = [];
-            if (optionsText) {
-                // Разбиваем по переносам строк и ищем варианты
-                const lines = optionsText.split('\n');
+        // Парсим варианты построчно (A), B), C), D))
+        const options = [];
+        if (optionsText) {
+            // Разбиваем по переносам строк и ищем варианты
+            const lines = optionsText.split('\n');
 
-                lines.forEach(line => {
-                    const match = line.match(/^([A-Z])\)\s*(.+)$/);
-                    if (match) {
-                        const text = match[2].trim();
-                        if (text) {
-                            options.push(text);
-                        }
+            lines.forEach(line => {
+                const match = line.match(/^([A-Z])\)\s*(.+)$/);
+                if (match) {
+                    const text = match[2].trim();
+                    if (text) {
+                        options.push(text);
                     }
-                });
-
-                // Если не нашли по строкам, пробуем старый метод (на случай если нейронка не добавила переносы)
-                if (options.length === 0) {
-                    const optionMatches = optionsText.split(/(?=[A-Z]\))/);
-                    optionMatches.forEach(opt => {
-                        const text = opt.replace(/^[A-Z]\)\s*/, '').trim();
-                        if (text) {
-                            options.push(text);
-                        }
-                    });
                 }
-            }
-
-            // Извлекаем правильный ответ
-            const correctMatch = content.match(/CORRECT:\s*\n?\s*([A-Z])/);
-            const correctLetter = correctMatch ? correctMatch[1] : null;
-
-            // Извлекаем объяснение
-            const explanationMatch = content.match(/EXPLANATION:\s*\n?\s*(.+?)$/s);
-            const explanation = explanationMatch ? explanationMatch[1].trim() : null;
-
-            console.log('📊 Парсинг результата:');
-            console.log(`Вопрос: ${question}`);
-            console.log(`Варианты (${options.length}): ${options.join(', ')}`);
-            console.log(`Правильный: ${correctLetter}`);
-            console.log(`Объяснение: ${explanation}`);
-
-            // Проверяем что все данные есть
-            if (!question || options.length < 2) {
-                console.log('⚠️ Не удалось распарсить ответ нейронки');
-                return ctx.reply(`❌ Не удалось распарсить ответ нейронки.\n\nСырой ответ:\n${content}`);
-            }
-
-            // Вычисляем индекс правильного ответа (A=0, B=1, C=2, D=3)
-            const correctIndex = correctLetter ? correctLetter.charCodeAt(0) - 'A'.charCodeAt(0) : null;
-            const correctAnswer = correctIndex !== null && options[correctIndex] ? options[correctIndex] : null;
-
-            // Создаем опрос в Telegram с таймером на 60 секунд
-            const pollMessage = await ctx.replyWithPoll(
-                question,
-                options,
-                {
-                    is_anonymous: false, // Не анонимный опрос
-                    allows_multiple_answers: false, // Один ответ
-                    open_period: 60 // Опрос открыт 60 секунд
-                }
-            );
-
-            const pollId = pollMessage.poll.id;
-            console.log(`✅ Опрос создан (ID: ${pollId}) и отправлен (закроется через 60 секунд)`);
-
-            // Сохраняем информацию об опросе
-            pollAnswers.set(pollId, {
-                correctIndex: correctIndex,
-                correctLetter: correctLetter,
-                correctAnswer: correctAnswer,
-                explanation: explanation,
-                answers: new Map() // userId -> { answerIndex, username }
             });
 
-            // Через 60 секунд показываем правильный ответ и результаты
-            setTimeout(async () => {
-                try {
-                    console.log('⏰ Время вышло, показываю правильный ответ...');
-
-                    const pollData = pollAnswers.get(pollId);
-                    if (!pollData) {
-                        console.log('⚠️ Данные опроса не найдены');
-                        return;
+            // Если не нашли по строкам, пробуем старый метод
+            if (options.length === 0) {
+                const optionMatches = optionsText.split(/(?=[A-Z]\))/);
+                optionMatches.forEach(opt => {
+                    const text = opt.replace(/^[A-Z]\)\s*/, '').trim();
+                    if (text) {
+                        options.push(text);
                     }
-
-                    let resultMessage = '⏱️ Время вышло!\n\n';
-                    resultMessage += `✅ Правильный ответ: ${correctLetter}) ${correctAnswer}\n\n`;
-
-                    if (explanation) {
-                        resultMessage += `💡 ${explanation}\n\n`;
-                    }
-
-                    // Разделяем ответы на правильные и неправильные
-                    const correctUsers = [];
-                    const incorrectUsers = [];
-
-                    for (const [userId, userData] of pollData.answers.entries()) {
-                        if (userData.answerIndex === correctIndex) {
-                            correctUsers.push(userData.username);
-                        } else {
-                            incorrectUsers.push(userData.username);
-                        }
-                    }
-
-                    // Показываем результаты
-                    if (correctUsers.length > 0 || incorrectUsers.length > 0) {
-                        resultMessage += '📊 Результаты:\n\n';
-
-                        if (correctUsers.length > 0) {
-                            resultMessage += `✅ Правильно ответили (${correctUsers.length}):\n`;
-                            resultMessage += correctUsers.map(name => `  • ${name}`).join('\n');
-                            resultMessage += '\n\n';
-                        }
-
-                        if (incorrectUsers.length > 0) {
-                            resultMessage += `❌ Неправильно ответили (${incorrectUsers.length}):\n`;
-                            resultMessage += incorrectUsers.map(name => `  • ${name}`).join('\n');
-                        }
-                    } else {
-                        resultMessage += '😢 Никто не ответил на опрос';
-                    }
-
-                    await ctx.reply(resultMessage);
-                    console.log('✅ Правильный ответ и результаты показаны');
-
-                    // Удаляем данные опроса
-                    pollAnswers.delete(pollId);
-
-                } catch (error) {
-                    console.error('❌ Ошибка при показе правильного ответа:', error);
-                }
-            }, 60000); // 60 секунд = 60000 миллисекунд
-
-        } catch (parseError) {
-            console.error('❌ Ошибка при парсинге:', parseError);
-            await ctx.reply(`❌ Ошибка при парсинге ответа.\n\nСырой ответ:\n${content}`);
+                });
+            }
         }
+
+        // Извлекаем правильный ответ
+        const correctMatch = content.match(/CORRECT:\s*\n?\s*([A-Z])/);
+        const correctLetter = correctMatch ? correctMatch[1] : null;
+
+        // Извлекаем объяснение
+        const explanationMatch = content.match(/EXPLANATION:\s*\n?\s*(.+?)$/s);
+        const explanation = explanationMatch ? explanationMatch[1].trim() : null;
+
+        console.log('📊 Парсинг результата:');
+        console.log(`Вопрос: ${question}`);
+        console.log(`Варианты (${options.length}): ${options.join(', ')}`);
+        console.log(`Правильный: ${correctLetter}`);
+        console.log(`Объяснение: ${explanation}`);
+
+        // Проверяем что все данные есть
+        if (!question || options.length < 2) {
+            console.log('⚠️ Не удалось распарсить ответ нейронки');
+            return ctx.reply(`❌ Не удалось распарсить ответ нейронки.\n\nСырой ответ:\n${content}`);
+        }
+
+        // Вычисляем индекс правильного ответа (A=0, B=1, C=2, D=3)
+        const correctIndex = correctLetter ? correctLetter.charCodeAt(0) - 'A'.charCodeAt(0) : null;
+        const correctAnswer = correctIndex !== null && options[correctIndex] ? options[correctIndex] : null;
+
+        // Создаем опрос в Telegram с таймером на 60 секунд
+        const pollMessage = await ctx.replyWithPoll(
+            question,
+            options,
+            {
+                is_anonymous: false, // Не анонимный опрос
+                allows_multiple_answers: false, // Один ответ
+                open_period: 120 // Опрос открыт 120 секунд (2 минуты)
+            }
+        );
+
+        const pollId = pollMessage.poll.id;
+        console.log(`✅ Опрос создан (ID: ${pollId}) и отправлен (закроется через 2 минуты)`);
+
+        // Сохраняем информацию об опросе
+        pollAnswers.set(pollId, {
+            correctIndex: correctIndex,
+            correctLetter: correctLetter,
+            correctAnswer: correctAnswer,
+            explanation: explanation,
+            answers: new Map() // userId -> { answerIndex, username }
+        });
+
+        // Через 120 секунд (2 минуты) показываем правильный ответ и результаты
+        setTimeout(async () => {
+            try {
+                console.log('⏰ Время вышло, показываю правильный ответ...');
+
+                const pollData = pollAnswers.get(pollId);
+                if (!pollData) {
+                    console.log('⚠️ Данные опроса не найдены');
+                    return;
+                }
+
+                let resultMessage = '⏱️ Время вышло!\n\n';
+                resultMessage += `✅ Правильный ответ: ${correctLetter}) ${correctAnswer}\n\n`;
+
+                if (explanation) {
+                    resultMessage += `💡 ${explanation}\n\n`;
+                }
+
+                // Разделяем ответы на правильные и неправильные
+                const correctUsers = [];
+                const incorrectUsers = [];
+
+                for (const [userId, userData] of pollData.answers.entries()) {
+                    if (userData.answerIndex === correctIndex) {
+                        correctUsers.push(userData.username);
+                    } else {
+                        incorrectUsers.push(userData.username);
+                    }
+                }
+
+                // Показываем результаты
+                if (correctUsers.length > 0 || incorrectUsers.length > 0) {
+                    resultMessage += '📜 Результаты:\n\n';
+
+                    if (correctUsers.length > 0) {
+                        resultMessage += `✅ Правильно ответили (${correctUsers.length}):\n`;
+                        resultMessage += correctUsers.map(name => `  • ${name}`).join('\n');
+                        resultMessage += '\n\n';
+                    }
+
+                    if (incorrectUsers.length > 0) {
+                        resultMessage += `❌ Неправильно ответили (${incorrectUsers.length}):\n`;
+                        resultMessage += incorrectUsers.map(name => `  • ${name}`).join('\n');
+                    }
+                } else {
+                    resultMessage += '😢 Никто не ответил на опрос';
+                }
+
+                await ctx.reply(resultMessage);
+                console.log('✅ Правильный ответ и результаты показаны');
+
+                // Удаляем данные опроса
+                pollAnswers.delete(pollId);
+
+            } catch (error) {
+                console.error('❌ Ошибка при показе правильного ответа:', error);
+            }
+        }, 120000); // 120 секунд = 120000 миллисекунд (2 минуты)
 
     } catch (error) {
         console.error('❌ Ошибка при генерации опроса:', error);
         ctx.reply('❌ Ошибка при генерации опроса');
     }
+}
+
+bot.command('poll', async (ctx) => {
+    // Работает только в личке с владельцем
+    if (ctx.chat.type !== 'private' || ctx.from.id !== ownerId) {
+        return ctx.reply('❌ Эта команда работает только в личке с владельцем');
+    }
+
+    // Используем целевой чат из .env
+    const chatId = targetChatId;
+
+    if (!chatId) {
+        return ctx.reply('❌ TARGET_CHAT_ID не указан в .env');
+    }
+
+    console.log('\n=== КОМАНДА /poll (тест) ===');
+    await createPollFromChat(ctx, chatId);
+});
+
+bot.command('opros', async (ctx) => {
+    // Работает только в группах
+    if (ctx.chat.type === 'private') {
+        return ctx.reply('❌ Эта команда работает только в группах');
+    }
+
+    const chatId = ctx.chat.id;
+
+    console.log('\n=== КОМАНДА /opros (группа) ===');
+    await createPollFromChat(ctx, chatId);
 });
 
 bot.command('summarizetest', async (ctx) => {
