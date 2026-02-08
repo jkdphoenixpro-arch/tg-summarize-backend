@@ -6,6 +6,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { GameManager } from './gameManager.js';
 import InMemoryStorage from './inMemoryStorage.js';
+import { connectDatabase } from './database.js';
+import Player from './models/Player.js';
 
 dotenv.config();
 
@@ -25,6 +27,9 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// Подключаемся к MongoDB
+await connectDatabase();
 
 // Redis клиент или In-Memory хранилище
 let redis;
@@ -156,6 +161,32 @@ app.get('/api/game/:gameId', async (req, res) => {
   try {
     const gameState = await gameManager.getGameState(req.params.gameId);
     res.json({ success: true, game: gameState });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Получить баланс и статистику игрока
+app.get('/api/player/:userId', async (req, res) => {
+  try {
+    const player = await Player.findOne({ userId: req.params.userId });
+    
+    if (!player) {
+      return res.json({ 
+        success: true, 
+        player: {
+          balance: 1000,
+          stats: {
+            gamesPlayed: 0,
+            gamesWon: 0,
+            gamesLost: 0,
+            gamesPush: 0
+          }
+        }
+      });
+    }
+    
+    res.json({ success: true, player });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

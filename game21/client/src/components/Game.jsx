@@ -45,6 +45,13 @@ function Game({ gameState, socket, user, gameId }) {
 
   return (
     <div className="game">
+      {/* Баланс игрока */}
+      {myPlayer && myPlayer.balance !== undefined && (
+        <div className="game-balance">
+          💰 Баланс: {myPlayer.balance}₽
+        </div>
+      )}
+
       {/* Дилер */}
       <div className="dealer-section">
         <div className="dealer-info">
@@ -71,6 +78,9 @@ function Game({ gameState, socket, user, gameId }) {
                 <span className="player-name">{player.username}</span>
                 <span className="score">{player.score}</span>
               </div>
+              {player.bet && (
+                <div className="player-bet">Ставка: {player.bet}₽</div>
+              )}
               <div className="cards-mini">
                 {player.cards.map((card, idx) => (
                   <Card key={idx} card={card} mini />
@@ -93,7 +103,12 @@ function Game({ gameState, socket, user, gameId }) {
       {myPlayer && (
         <div className="my-player">
           <div className="player-info">
-            <span className="player-name">Вы: {myPlayer.username}</span>
+            <div>
+              <div className="player-name">Вы: {myPlayer.username}</div>
+              {myPlayer.bet && (
+                <div className="my-bet">Ставка: {myPlayer.bet}₽</div>
+              )}
+            </div>
             <span className="score large">{myPlayer.score}</span>
           </div>
           <div className="cards-container">
@@ -109,8 +124,8 @@ function Game({ gameState, socket, user, gameId }) {
           )}
           {isFinished && myPlayer.result && (
             <div className={`result-message ${myPlayer.result}`}>
-              {myPlayer.result === 'win' ? '🎉 Вы выиграли!' : 
-               myPlayer.result === 'push' ? '🤝 Ничья' : '😔 Вы проиграли'}
+              {myPlayer.result === 'win' ? `🎉 Вы выиграли +${myPlayer.bet}₽!` : 
+               myPlayer.result === 'push' ? '🤝 Ничья' : `😔 Вы проиграли -${myPlayer.bet}₽`}
             </div>
           )}
         </div>

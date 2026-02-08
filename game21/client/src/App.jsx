@@ -131,19 +131,21 @@ function App() {
                 gameId: gameId,
                 userId: user.userId,
                 username: user.username,
-                photoUrl: user.photoUrl
+                photoUrl: user.photoUrl,
+                bet: 20 // Дефолтная ставка при автоподключении
             });
         }
     }, [socket, user, gameId, gameState]);
 
-    const handleJoinGame = (gId) => {
-        console.log('🎮 Manual join game:', gId);
+    const handleJoinGame = (gId, bet = 20) => {
+        console.log('🎮 Manual join game:', gId, 'bet:', bet);
         if (socket && user) {
             socket.emit('join_game', {
                 gameId: gId,
                 userId: user.userId,
                 username: user.username,
-                photoUrl: user.photoUrl
+                photoUrl: user.photoUrl,
+                bet: bet
             });
             setGameId(gId);
         }
@@ -173,7 +175,14 @@ function App() {
 
     if (!gameId || !gameState) {
         console.log('🔧 Waiting for gameId and gameState...', { gameId, gameState: !!gameState });
-        return <Lobby onJoinGame={handleJoinGame} initialGameId={gameId} />;
+        return (
+            <Lobby 
+                onJoinGame={handleJoinGame} 
+                initialGameId={gameId}
+                user={user}
+                socketUrl={SOCKET_URL}
+            />
+        );
     }
 
     console.log('🎮 Rendering game...');

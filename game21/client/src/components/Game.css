@@ -6,6 +6,16 @@
   gap: 1rem;
 }
 
+.game-balance {
+  background: var(--tg-theme-secondary-bg-color, #2a2a2a);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  text-align: center;
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: var(--tg-theme-button-color, #3390ec);
+}
+
 .dealer-section {
   background: var(--tg-theme-secondary-bg-color, #2a2a2a);
   border-radius: 16px;
@@ -63,6 +73,18 @@
 .player-name {
   font-weight: 600;
   font-size: 0.9rem;
+}
+
+.player-bet {
+  font-size: 0.8rem;
+  color: var(--tg-theme-hint-color, #999);
+  margin-bottom: 0.5rem;
+}
+
+.my-bet {
+  font-size: 0.85rem;
+  opacity: 0.9;
+  margin-top: 0.25rem;
 }
 
 .cards-mini {

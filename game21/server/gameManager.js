@@ -1,6 +1,11 @@
+import Player from './models/Player.js';
+import { isDatabaseConnected } from './database.js';
+
 export class GameManager {
   constructor(redis) {
     this.redis = redis;
+    this.MIN_BET = 20;
+    this.MAX_BET = 300;
   }
 
   async createGame() {
@@ -74,7 +79,7 @@ export class GameManager {
     await this.redis.set(`game:${game.id}`, JSON.stringify(game), { EX: 3600 });
   }
 
-  async joinGame(gameId, userId, username, photoUrl) {
+  async joinGame(gameId, userId, username, photoUrl, bet = 20) {
     const game = await this.getGameState(gameId);
     
     if (!game) {
@@ -98,6 +103,34 @@ export class GameManager {
     if (game.players.length >= 6) {
       return { success: false, error: 'Игра заполнена (макс. 6 игроков)' };
     }
+
+    // Проверяем ставку
+    if (bet < this.MIN_BET) {
+      return { success: false, error: `Минимальная ставка ${this.MIN_BET}₽` };
+    }
+    
+    if (bet > this.MAX_BET) {
+      return { success: false, error: `Максимальная ставка ${this.MAX_BET}₽` };
+    }
+
+    // Проверяем баланс игрока в MongoDB (если подключена)
+    let playerBalance = 1000; // Дефолтный баланс
+    if (isDatabaseConnected()) {
+      try {
+        const player = await Player.getOrCreate(userId, username);
+        playerBalance = player.balance;
+        
+        if (!player.canBet(bet)) {
+          return { 
+            success: false, 
+            error: `Недостаточно средств. Баланс: ${player.balance}₽` 
+          };
+        }
+      } catch (error) {
+        console.error('Ошибка проверки баланса:', error);
+        // Продолжаем без проверки баланса если MongoDB недоступна
+      }
+    }
     
     // Добавляем нового игрока
     game.players.push({
@@ -107,10 +140,12 @@ export class GameManager {
       cards: [],
       score: 0,
       status: 'active', // active, stand, busted
-      bet: 0
+      bet: bet,
+      balance: playerBalance
     });
     
     await this.saveGameState(game);
+    console.log(`✅ ${username} присоединился к игре со ставкой ${bet}₽`);
     return { success: true, reconnected: false };
   }
 
@@ -210,7 +245,7 @@ export class GameManager {
     
     // Все игроки завершили - ход дилера
     await this.dealerTurn(game);
-    this.determineWinners(game);
+    await this.determineWinners(game);
     game.status = 'finished';
     
     return true;
@@ -225,7 +260,7 @@ export class GameManager {
     }
   }
 
-  determineWinners(game) {
+  async determineWinners(game) {
     const dealerScore = game.dealer.score;
     const dealerBusted = dealerScore > 21;
     
@@ -240,6 +275,28 @@ export class GameManager {
         player.result = 'push';
       } else {
         player.result = 'lose';
+      }
+
+      // Сохраняем результат в MongoDB и обновляем баланс
+      if (isDatabaseConnected()) {
+        try {
+          const dbPlayer = await Player.findOne({ userId: player.userId });
+          if (dbPlayer) {
+            await dbPlayer.updateAfterGame(player.result, player.bet);
+            // Обновляем баланс в gameState
+            player.balance = dbPlayer.balance;
+          }
+        } catch (error) {
+          console.error(`Ошибка сохранения результата для ${player.username}:`, error);
+        }
+      } else {
+        // Если MongoDB не подключена, обновляем баланс локально
+        if (player.result === 'win') {
+          player.balance = (player.balance || 1000) + player.bet;
+        } else if (player.result === 'lose') {
+          player.balance = (player.balance || 1000) - player.bet;
+        }
+        // При push баланс не меняется
       }
     }
   }
