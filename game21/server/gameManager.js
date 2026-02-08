@@ -126,10 +126,19 @@ export class GameManager {
             error: `Недостаточно средств. Баланс: ${player.balance}₽` 
           };
         }
+        
+        // Списываем ставку сразу при присоединении
+        player.balance -= bet;
+        await player.save();
+        playerBalance = player.balance;
+        console.log(`💰 Списано ${bet}₽ с баланса ${username}. Новый баланс: ${playerBalance}₽`);
       } catch (error) {
         console.error('Ошибка проверки баланса:', error);
         // Продолжаем без проверки баланса если MongoDB недоступна
       }
+    } else {
+      // Если MongoDB не подключена, вычитаем локально
+      playerBalance -= bet;
     }
     
     // Добавляем нового игрока
@@ -282,21 +291,39 @@ export class GameManager {
         try {
           const dbPlayer = await Player.findOne({ userId: player.userId });
           if (dbPlayer) {
-            await dbPlayer.updateAfterGame(player.result, player.bet);
+            // Ставка уже списана при присоединении
+            // Теперь добавляем выигрыш или возвращаем ставку
+            if (player.result === 'win') {
+              // Возвращаем ставку + выигрыш
+              dbPlayer.balance += player.bet * 2;
+              dbPlayer.gamesWon += 1;
+            } else if (player.result === 'push') {
+              // Возвращаем ставку
+              dbPlayer.balance += player.bet;
+            }
+            // При lose ничего не делаем - ставка уже списана
+            
+            dbPlayer.gamesPlayed += 1;
+            await dbPlayer.save();
+            
             // Обновляем баланс в gameState
             player.balance = dbPlayer.balance;
+            console.log(`💰 ${player.username} ${player.result}: баланс ${player.balance}₽`);
           }
         } catch (error) {
           console.error(`Ошибка сохранения результата для ${player.username}:`, error);
         }
       } else {
         // Если MongoDB не подключена, обновляем баланс локально
+        // Ставка уже списана при присоединении
         if (player.result === 'win') {
-          player.balance = (player.balance || 1000) + player.bet;
-        } else if (player.result === 'lose') {
-          player.balance = (player.balance || 1000) - player.bet;
+          // Возвращаем ставку + выигрыш
+          player.balance += player.bet * 2;
+        } else if (player.result === 'push') {
+          // Возвращаем ставку
+          player.balance += player.bet;
         }
-        // При push баланс не меняется
+        // При lose ничего не делаем - ставка уже списана
       }
     }
   }

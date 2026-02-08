@@ -69,10 +69,10 @@ console.log('🔧 Setting up Socket.io handlers...');
 io.on('connection', (socket) => {
   console.log('✅ Игрок подключился:', socket.id);
 
-  socket.on('join_game', async ({ gameId, userId, username, photoUrl }) => {
-    console.log('🎮 join_game event:', { gameId, userId, username });
+  socket.on('join_game', async ({ gameId, userId, username, photoUrl, bet }) => {
+    console.log('🎮 join_game event:', { gameId, userId, username, bet });
     try {
-      const result = await gameManager.joinGame(gameId, userId, username, photoUrl);
+      const result = await gameManager.joinGame(gameId, userId, username, photoUrl, bet);
       console.log('🎮 join_game result:', result);
       
       if (result.success) {

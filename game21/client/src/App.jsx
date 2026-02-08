@@ -122,20 +122,7 @@ function App() {
         };
     }, [socket]);
 
-    // Автоматически присоединяемся к игре если есть gameId
-    useEffect(() => {
-        if (socket && user && gameId && !gameState) {
-            console.log('🎮 Auto-joining game:', gameId);
-            console.log('🎮 User:', user);
-            socket.emit('join_game', {
-                gameId: gameId,
-                userId: user.userId,
-                username: user.username,
-                photoUrl: user.photoUrl,
-                bet: 20 // Дефолтная ставка при автоподключении
-            });
-        }
-    }, [socket, user, gameId, gameState]);
+    // Убрано автоматическое присоединение - игрок должен выбрать ставку в лобби
 
     const handleJoinGame = (gId, bet = 20) => {
         console.log('🎮 Manual join game:', gId, 'bet:', bet);
@@ -173,8 +160,8 @@ function App() {
         );
     }
 
-    if (!gameId || !gameState) {
-        console.log('🔧 Waiting for gameId and gameState...', { gameId, gameState: !!gameState });
+    if (!gameState) {
+        console.log('🔧 Showing lobby...', { gameId, gameState: !!gameState });
         return (
             <Lobby 
                 onJoinGame={handleJoinGame} 

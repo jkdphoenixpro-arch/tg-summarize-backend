@@ -11,6 +11,13 @@ function Lobby({ onJoinGame, initialGameId, user, socketUrl }) {
   const MAX_BET = 300;
 
   useEffect(() => {
+    // Обновляем gameId если он изменился извне
+    if (initialGameId && initialGameId !== gameId) {
+      setGameId(initialGameId);
+    }
+  }, [initialGameId]);
+
+  useEffect(() => {
     // Загружаем баланс игрока
     if (user && socketUrl) {
       fetchBalance();
@@ -68,6 +75,9 @@ function Lobby({ onJoinGame, initialGameId, user, socketUrl }) {
                 onChange={(e) => setGameId(e.target.value)}
                 className="game-id-input"
               />
+              {initialGameId && (
+                <p className="hint-text">ID игры предзаполнен. Выберите ставку и присоединяйтесь!</p>
+              )}
 
               <div className="bet-section">
                 <label className="bet-label">Ставка</label>
