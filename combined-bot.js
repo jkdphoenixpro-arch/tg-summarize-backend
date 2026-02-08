@@ -158,22 +158,6 @@ function extractFinalText(message, options = {}) {
     }
 }
 
-bot.start((ctx) => {
-    // Сохраняем ID владельца
-    if (!ownerId && ctx.chat.type === 'private') {
-        ownerId = ctx.from.id;
-        console.log(`👤 Владелец бота: ${ctx.from.username || ctx.from.first_name} (ID: ${ownerId})`);
-    }
-
-    ctx.reply(
-        '👋 Здарова! Я позитивный добрый AI-бот добавь меня пожалуйста в группу что б нести позитив\n\n' +
-        '📋 Команды для группы:\n' +
-        '/summarize - Суммаризировать последние сообщения\n' +
-        '/opros - Создать мемный опрос на основе истории чата\n\n' +
-        'Нужно писать в группе!'
-    );
-});
-
 bot.command('status', async (ctx) => {
     if (ctx.chat.type !== 'private' || ctx.from.id !== ownerId) {
         return;
@@ -841,6 +825,103 @@ bot.command('opros', async (ctx) => {
 
     console.log('\n=== КОМАНДА /opros (группа) ===');
     await createPollFromChat(ctx, chatId);
+});
+
+bot.command('game21', async (ctx) => {
+    // Работает только в группах
+    if (ctx.chat.type === 'private') {
+        return ctx.reply('❌ Эта команда работает только в группах');
+    }
+
+    try {
+        // Создаем новую игру через API
+        const response = await fetch(`${process.env.GAME_SERVER_URL || 'http://localhost:3001'}/api/create-game`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+
+        if (!data.success) {
+            return ctx.reply('❌ Не удалось создать игру');
+        }
+
+        const gameId = data.gameId;
+        const botUsername = ctx.botInfo.username;
+
+        console.log(`🎮 Создана игра ${gameId}`);
+
+        // В группе показываем кнопку для перехода в личку с ботом
+        await ctx.reply(
+            '🎴 Новая игра в 21 Очко!\n\n' +
+            '🎯 Правила:\n' +
+            '• От 2 до 6 игроков\n' +
+            '• Цель: набрать 21 очко или близко к этому\n' +
+            '• Не перебрать 21!\n\n' +
+            '👇 Нажми кнопку чтобы присоединиться к игре',
+            {
+                reply_markup: {
+                    inline_keyboard: [[
+                        {
+                            text: '🎮 Подключиться к игре',
+                            url: `https://t.me/${botUsername}?start=${gameId}`
+                        }
+                    ]]
+                }
+            }
+        );
+
+        console.log(`✅ Сообщение отправлено в чат ${ctx.chat.id}`);
+
+    } catch (error) {
+        console.error('❌ Ошибка создания игры:', error);
+        ctx.reply('❌ Ошибка при создании игры. Убедись что игровой сервер запущен.');
+    }
+});
+
+// Обработчик /start в личке (когда пользователь переходит из группы)
+bot.start(async (ctx) => {
+    // Сохраняем ID владельца
+    if (!ownerId && ctx.chat.type === 'private') {
+        ownerId = ctx.from.id;
+        console.log(`👤 Владелец бота: ${ctx.from.username || ctx.from.first_name} (ID: ${ownerId})`);
+    }
+
+    // Проверяем есть ли параметр start (gameId)
+    const startPayload = ctx.startPayload;
+    
+    if (startPayload && startPayload.startsWith('game_')) {
+        // Это gameId - показываем кнопку для открытия игры
+        const gameId = startPayload;
+        const webAppUrl = `${process.env.WEBAPP_URL || 'http://localhost:5173'}?gameId=${gameId}`;
+        
+        console.log(`🎮 Пользователь ${ctx.from.id} открывает игру ${gameId}`);
+        
+        await ctx.reply(
+            '🎴 Добро пожаловать в игру 21 Очко!\n\n' +
+            '👇 Нажми кнопку ниже чтобы открыть игру',
+            {
+                reply_markup: {
+                    inline_keyboard: [[
+                        {
+                            text: '🎮 Открыть игру',
+                            web_app: { url: webAppUrl }
+                        }
+                    ]]
+                }
+            }
+        );
+    } else {
+        // Обычное приветствие
+        ctx.reply(
+            '👋 Здарова! Я позитивный добрый AI-бот добавь меня пожалуйста в группу что б нести позитив\n\n' +
+            '📋 Команды для группы:\n' +
+            '/summarize - Суммаризировать последние сообщения\n' +
+            '/opros - Создать мемный опрос на основе истории чата\n' +
+            '/game21 - Сыграть в 21 Очко (2-6 игроков)\n\n' +
+            'Нужно писать в группе!'
+        );
+    }
 });
 
 bot.command('summarizetest', async (ctx) => {

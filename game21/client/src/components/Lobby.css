@@ -1,0 +1,54 @@
+.lobby {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.lobby-content {
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+}
+
+.lobby h1 {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.subtitle {
+  color: var(--tg-theme-hint-color, #999);
+  margin-bottom: 2rem;
+}
+
+.join-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.game-id-input {
+  padding: 1rem;
+  font-size: 1rem;
+  border: 2px solid var(--tg-theme-button-color, #3390ec);
+  border-radius: 12px;
+  background: var(--tg-theme-secondary-bg-color, #2a2a2a);
+  color: var(--tg-theme-text-color, #fff);
+  text-align: center;
+}
+
+.join-button {
+  padding: 1rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  background: var(--tg-theme-button-color, #3390ec);
+  color: var(--tg-theme-button-text-color, #fff);
+  border-radius: 12px;
+  transition: opacity 0.2s;
+}
+
+.join-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

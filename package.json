@@ -11,7 +11,11 @@
     "collector:dev": "node --watch collector-bot.js",
     "userbot": "node userbot-collector.js",
     "combined": "node combined-bot.js",
-    "combined:dev": "node --watch combined-bot.js"
+    "combined:dev": "node --watch combined-bot.js",
+    "game:install": "cd game21 && npm run install:all",
+    "game:dev": "cd game21 && npm run dev",
+    "game:server": "cd game21/server && npm run dev",
+    "game:client": "cd game21/client && npm run dev"
   },
   "keywords": [
     "telegram",
