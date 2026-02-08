@@ -81,6 +81,16 @@ export class GameManager {
       return { success: false, error: 'Игра не найдена' };
     }
     
+    // Проверяем есть ли игрок уже в игре
+    const existingPlayer = game.players.find(p => p.userId === userId);
+    
+    if (existingPlayer) {
+      // Игрок уже в игре - разрешаем переподключение
+      console.log(`🔄 Игрок ${username} переподключается к игре ${gameId}`);
+      return { success: true, reconnected: true };
+    }
+    
+    // Новый игрок может присоединиться только если игра ещё не началась
     if (game.status !== 'waiting') {
       return { success: false, error: 'Игра уже началась' };
     }
@@ -89,10 +99,7 @@ export class GameManager {
       return { success: false, error: 'Игра заполнена (макс. 6 игроков)' };
     }
     
-    if (game.players.find(p => p.userId === userId)) {
-      return { success: false, error: 'Вы уже в игре' };
-    }
-    
+    // Добавляем нового игрока
     game.players.push({
       userId,
       username,
@@ -104,7 +111,7 @@ export class GameManager {
     });
     
     await this.saveGameState(game);
-    return { success: true };
+    return { success: true, reconnected: false };
   }
 
   async startGame(gameId, userId) {
