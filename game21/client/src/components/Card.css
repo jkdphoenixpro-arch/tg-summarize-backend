@@ -1,17 +1,18 @@
 .card {
-  width: 80px;
-  height: 112px;
+  width: 60px;
+  height: 84px;
   background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
   position: relative;
   transition: transform 0.2s;
+  flex-shrink: 0;
 }
 
 .card.mini {
-  width: 40px;
-  height: 56px;
-  border-radius: 4px;
+  width: 32px;
+  height: 45px;
+  border-radius: 3px;
 }
 
 .card-back {
@@ -27,24 +28,24 @@
   background: repeating-linear-gradient(
     45deg,
     rgba(255, 255, 255, 0.1),
-    rgba(255, 255, 255, 0.1) 10px,
-    transparent 10px,
-    transparent 20px
+    rgba(255, 255, 255, 0.1) 8px,
+    transparent 8px,
+    transparent 16px
   );
-  border-radius: 4px;
+  border-radius: 3px;
 }
 
 .card-content {
   width: 100%;
   height: 100%;
-  padding: 0.5rem;
+  padding: 0.35rem;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
 }
 
 .card.mini .card-content {
-  padding: 0.25rem;
+  padding: 0.2rem;
 }
 
 .card-corner {
@@ -64,20 +65,20 @@
 }
 
 .rank {
-  font-size: 1.2rem;
+  font-size: 1rem;
   font-weight: 700;
 }
 
 .card.mini .rank {
-  font-size: 0.7rem;
+  font-size: 0.6rem;
 }
 
 .suit {
-  font-size: 1rem;
+  font-size: 0.85rem;
 }
 
 .card.mini .suit {
-  font-size: 0.6rem;
+  font-size: 0.5rem;
 }
 
 .card-center {
@@ -88,10 +89,10 @@
 }
 
 .suit-large {
-  font-size: 2.5rem;
+  font-size: 2rem;
   opacity: 0.3;
 }
 
 .card.mini .suit-large {
-  font-size: 1.5rem;
+  font-size: 1.2rem;
 }
