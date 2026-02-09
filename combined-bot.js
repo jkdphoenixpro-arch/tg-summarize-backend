@@ -1,4 +1,4 @@
-import { Telegraf } from 'telegraf';
+﻿import { Telegraf } from 'telegraf';
 import { Groq } from 'groq-sdk';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
@@ -93,6 +93,9 @@ const chatMessages = new Map();
 let ownerId = null;
 // ID целевого чата для анализа
 const targetChatId = process.env.TARGET_CHAT_ID;
+
+// Хранилище последних игровых сообщений в личке: userId -> messageId
+const lastPrivateGameMessages = new Map();
 
 // Хранилище ответов на опросы: pollId -> { correctIndex, answers: Map(userId -> answerIndex) }
 const pollAnswers = new Map();
@@ -218,10 +221,7 @@ bot.command('status', async (ctx) => {
             // Формируем содержимое файла
             const content = allMessages.map(msg => `${msg.username}: ${msg.text}`).join('\n');
 
-            // Сохраняем в файл
-            fs.writeFileSync('messages.txt', content, 'utf-8');
-
-            console.log(`💾 Сохранено ${allMessages.length} сообщений в messages.txt (MESSAGE_LIMIT=${saveLimit})`);
+            console.log(`💾 Сохранено ${allMessages.length} сообщений в памяти (MESSAGE_LIMIT=${saveLimit})`);
 
             // Отправляем подтверждение
             await ctx.reply(`💾 Сохранено ${allMessages.length} сообщений в messages.txt`);
@@ -376,10 +376,7 @@ bot.command('save', async (ctx) => {
         // Формируем содержимое файла (в обратном порядке - от старых к новым)
         const content = messages.reverse().map(msg => `${msg.username}: ${msg.text}`).join('\n');
 
-        // Сохраняем в файл
-        fs.writeFileSync('messages.txt', content, 'utf-8');
-
-        console.log(`💾 Файл messages.txt создан (${content.length} символов)`);
+        console.log(`💾 Сообщения сохранены в памяти (${content.length} символов)`);
 
         // Сохраняем в память бота
         chatMessages.set(targetChatId, messages);
@@ -489,8 +486,7 @@ bot.command('summarize', async (ctx) => {
             return `Пользователь: ${msg.username}\nСообщение: ${msg.text}\n---`;
         }).join('\n');
 
-        fs.writeFileSync('messages.txt', fileContent, 'utf-8');
-        console.log('💾 Сохранено в messages.txt');
+        console.log('💾 Сообщения сохранены в памяти');
 
         await ctx.sendChatAction('typing');
 
@@ -592,8 +588,7 @@ async function createPollFromChat(ctx, chatId) {
             return `Пользователь: ${msg.username}\nСообщение: ${msg.text}\n---`;
         }).join('\n');
 
-        fs.writeFileSync('messages.txt', fileContent, 'utf-8');
-        console.log('💾 Сохранено в messages.txt');
+        console.log('💾 Сообщения сохранены в памяти');
 
         // Выбираем сообщения с учетом лимита токенов
         const selectedMessages = selectMessagesWithinTokenLimit(messages, MAX_CONTEXT_TOKENS);
@@ -948,15 +943,27 @@ bot.start(async (ctx) => {
 
     // Проверяем есть ли параметр start (gameId)
     const startPayload = ctx.startPayload;
-    
+
     if (startPayload && startPayload.startsWith('game_')) {
+        // Удаляем старое сообщение о игре если есть
+        const lastMessageId = lastPrivateGameMessages.get(ctx.from.id);
+        if (lastMessageId) {
+            try {
+                await ctx.deleteMessage(lastMessageId);
+                console.log(`🗑️ Удалено старое игровое сообщение в личке: ${lastMessageId}`);
+            } catch (e) {
+                // Сообщение уже удалено или недоступно
+                console.log(`⚠️ Не удалось удалить старое сообщение: ${e.message}`);
+            }
+        }
+
         // Это gameId - показываем кнопку для открытия игры
         const gameId = startPayload;
         const webAppUrl = `${process.env.WEBAPP_URL || 'http://localhost:5173'}?gameId=${gameId}`;
-        
+
         console.log(`🎮 Пользователь ${ctx.from.id} открывает игру ${gameId}`);
-        
-        await ctx.reply(
+
+        const message = await ctx.reply(
             '🎴 Добро пожаловать в игру 21 Очко!\n\n' +
             '👇 Нажми кнопку ниже чтобы открыть игру',
             {
@@ -970,6 +977,10 @@ bot.start(async (ctx) => {
                 }
             }
         );
+
+        // Сохраняем ID нового сообщения
+        lastPrivateGameMessages.set(ctx.from.id, message.message_id);
+        console.log(`✅ Игровое сообщение отправлено в личку, ID: ${message.message_id}`);
     } else {
         // Обычное приветствие
         ctx.reply(
@@ -1062,8 +1073,7 @@ bot.command('summarizetest', async (ctx) => {
             return `Пользователь: ${msg.username}\nСообщение: ${msg.text}\n---`;
         }).join('\n');
 
-        fs.writeFileSync('messages.txt', fileContent, 'utf-8');
-        console.log('💾 Сохранено в messages.txt');
+        console.log('💾 Сообщения сохранены в памяти');
 
         await ctx.sendChatAction('typing');
 

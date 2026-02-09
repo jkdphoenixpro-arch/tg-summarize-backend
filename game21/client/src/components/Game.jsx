@@ -7,12 +7,22 @@ import './Game.css';
 function Game({ gameState, socket, user, gameId }) {
   const [canAct, setCanAct] = useState(false);
   const [remainingTime, setRemainingTime] = useState(30);
+  const [autoStartRemaining, setAutoStartRemaining] = useState(0);
   const [showTimeoutMessage, setShowTimeoutMessage] = useState(false);
+  const [canExtend, setCanExtend] = useState(true);
   const prevGameStatusRef = useRef(null);
   const prevMyCardsLengthRef = useRef(0);
   const prevResultRef = useRef(null);
 
   useEffect(() => {
+    // Обновляем оставшееся время хода (всегда, независимо от статуса)
+    if (gameState?.remainingTime !== undefined) {
+      console.log('⏱️ Получено remainingTime из gameState:', gameState.remainingTime, 'Текущее:', remainingTime);
+      setRemainingTime(gameState.remainingTime);
+    } else if (gameState?.status === 'playing') {
+      console.warn('⚠️ remainingTime отсутствует в gameState при status=playing');
+    }
+
     if (!gameState || gameState.status !== 'playing') {
       setCanAct(false);
       return;
@@ -25,12 +35,15 @@ function Game({ gameState, socket, user, gameId }) {
       currentPlayer?.userId === user.userId && 
       myPlayer?.status === 'active'
     );
-
-    // Обновляем оставшееся время
-    if (gameState.remainingTime !== undefined) {
-      setRemainingTime(gameState.remainingTime);
-    }
   }, [gameState, user]);
+
+  // Обновляем время автостарта
+  useEffect(() => {
+    if (gameState?.autoStartRemaining !== undefined) {
+      console.log('🔄 Обновление autoStartRemaining:', gameState.autoStartRemaining);
+      setAutoStartRemaining(gameState.autoStartRemaining);
+    }
+  }, [gameState?.autoStartRemaining]);
 
   useEffect(() => {
     // Слушаем событие таймаута
@@ -42,10 +55,19 @@ function Game({ gameState, socket, user, gameId }) {
       }
     };
 
+    // Слушаем событие продления автостарта
+    const handleAutoStartExtended = () => {
+      setCanExtend(false);
+      // Разрешаем продлить снова через 5 секунд
+      setTimeout(() => setCanExtend(true), 5000);
+    };
+
     socket.on('turn_timeout', handleTimeout);
+    socket.on('auto_start_extended', handleAutoStartExtended);
 
     return () => {
       socket.off('turn_timeout', handleTimeout);
+      socket.off('auto_start_extended', handleAutoStartExtended);
     };
   }, [socket, user]);
 
@@ -104,6 +126,12 @@ function Game({ gameState, socket, user, gameId }) {
     socket.emit('start_game', { gameId, userId: user.userId });
   };
 
+  const handleExtendTime = () => {
+    if (!canExtend) return;
+    hapticFeedback('light');
+    socket.emit('extend_auto_start', { gameId, userId: user.userId });
+  };
+
   if (!gameState) return null;
 
   const myPlayer = gameState.players.find(p => p.userId === user.userId);
@@ -112,6 +140,20 @@ function Game({ gameState, socket, user, gameId }) {
   const isFinished = gameState.status === 'finished';
   const currentPlayer = gameState.players[gameState.currentPlayerIndex];
   const isMyTurn = currentPlayer?.userId === user.userId && myPlayer?.status === 'active';
+  const isCreator = gameState.creator === user.userId;
+  const creatorPlayer = gameState.players.find(p => p.userId === gameState.creator);
+  const maxAutoStartTime = 180; // Максимум 180 секунд
+
+  // Отладка
+  if (isWaiting && gameState.players.length >= 2) {
+    console.log('🔍 Debug:', {
+      playersCount: gameState.players.length,
+      autoStartRemaining,
+      isCreator,
+      creator: gameState.creator,
+      userId: user.userId
+    });
+  }
 
   // Определяем цвет таймера
   const getTimerColor = () => {
@@ -130,7 +172,7 @@ function Game({ gameState, socket, user, gameId }) {
       )}
 
       {/* Таймер хода */}
-      {gameState.status === 'playing' && !isFinished && (
+      {gameState.status === 'playing' && !isFinished && remainingTime > 0 && (
         <div className="turn-timer-container">
           <div 
             className={`turn-timer ${remainingTime <= 10 ? 'warning' : ''} ${remainingTime <= 5 ? 'critical' : ''}`}
@@ -263,14 +305,45 @@ function Game({ gameState, socket, user, gameId }) {
             <div className="waiting-info">
               <p>Игроков: {gameState.players.length}/6</p>
               <p className="hint">Минимум 2 игрока для старта</p>
+              {creatorPlayer && (
+                <p className="creator-info">
+                  👑 Создатель: {creatorPlayer.username}
+                </p>
+              )}
             </div>
-            <button 
-              onClick={handleStart}
-              className="btn-primary"
-              disabled={gameState.players.length < 2}
-            >
-              Начать игру
-            </button>
+
+            {/* Таймер автостарта */}
+            {gameState.players.length >= 2 && autoStartRemaining > 0 && (
+              <div className="auto-start-timer">
+                <div className={`timer-display ${autoStartRemaining <= 30 ? 'warning' : ''}`}>
+                  ⏰ Автостарт через {autoStartRemaining}с
+                </div>
+                {isCreator && autoStartRemaining < maxAutoStartTime && (
+                  <button 
+                    onClick={handleExtendTime}
+                    className="btn-extend"
+                    disabled={!canExtend}
+                  >
+                    ⏱️ +30 сек {!canExtend && '(подождите)'}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Кнопка начать игру - только для создателя */}
+            {isCreator ? (
+              <button 
+                onClick={handleStart}
+                className="btn-primary"
+                disabled={gameState.players.length < 2}
+              >
+                🎮 Начать игру
+              </button>
+            ) : (
+              <div className="waiting-creator">
+                Ожидание создателя...
+              </div>
+            )}
           </>
         )}
 

@@ -61,11 +61,7 @@ async function main() {
             return `${msg.username}: ${msg.text}`;
         }).join('\n');
 
-        // Сохраняем в файл с фиксированным именем
-        const filename = 'messages.txt';
-        fs.writeFileSync(filename, content, 'utf-8');
-
-        console.log(`💾 Файл сохранен: ${filename}`);
+        console.log(`💾 Собрано ${messages.length} сообщений в памяти`);
         console.log(`📊 Формат: username: текст (по одному сообщению на строку)`);
 
     } catch (error) {

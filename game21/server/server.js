@@ -61,22 +61,10 @@ if (process.env.USE_MEMORY_STORAGE === 'true') {
   }
 }
 
-const gameManager = new GameManager(redis);
-
-// Устанавливаем io после создания gameManager
-gameManager.io = io;
+const gameManager = new GameManager(redis, io, startGameInterval);
 
 // Хранилище интервалов для каждой игры (для очистки)
 const gameIntervals = new Map();
-
-// Функция для отправки обновлений игры с информацией о времени
-function emitGameUpdate(gameId, gameState) {
-  const remainingTime = gameManager.getRemainingTime(gameState);
-  io.to(gameId).emit('game_update', {
-    ...gameState,
-    remainingTime
-  });
-}
 
 // Функция для очистки интервала игры
 function clearGameInterval(gameId) {
@@ -86,6 +74,43 @@ function clearGameInterval(gameId) {
     gameIntervals.delete(gameId);
     console.log(`🧹 Интервал очищен для игры ${gameId}`);
   }
+}
+
+// Функция для запуска интервала обновления игры
+function startGameInterval(gameId) {
+  // Очищаем старый интервал если есть
+  clearGameInterval(gameId);
+  
+  // Устанавливаем интервал для отправки обновлений времени
+  const intervalId = setInterval(async () => {
+    const currentGame = await gameManager.getGameState(gameId);
+    if (!currentGame || currentGame.status !== 'playing') {
+      clearGameInterval(gameId);
+      return;
+    }
+    emitGameUpdate(gameId, currentGame);
+  }, 1000); // Обновляем каждую секунду
+  
+  // Сохраняем intervalId в Map для очистки
+  gameIntervals.set(gameId, intervalId);
+  console.log(`⏱️ Интервал обновления запущен для игры ${gameId}`);
+}
+
+// Функция для отправки обновлений игры с информацией о времени
+function emitGameUpdate(gameId, gameState) {
+  const remainingTime = gameManager.getRemainingTime(gameState);
+  const autoStartRemaining = gameManager.getAutoStartRemainingTime(gameState);
+  
+  // Логируем для отладки
+  if (gameState.status === 'playing') {
+    console.log(`📤 emitGameUpdate: gameId=${gameId}, remainingTime=${remainingTime}, status=${gameState.status}`);
+  }
+  
+  io.to(gameId).emit('game_update', {
+    ...gameState,
+    remainingTime,
+    autoStartRemaining
+  });
 }
 
 console.log('🔧 Setting up Socket.io handlers...');
@@ -107,7 +132,24 @@ io.on('connection', (socket) => {
         
         const gameState = await gameManager.getGameState(gameId);
         console.log('📤 Sending game_update to room:', gameId);
-        io.to(gameId).emit('game_update', gameState);
+        
+        // Отправляем обновление с таймерами
+        emitGameUpdate(gameId, gameState);
+        
+        // Если это второй игрок и игра в ожидании, запускаем интервал для автостарта
+        if (gameState.players.length >= 2 && gameState.status === 'waiting' && !gameIntervals.has(gameId)) {
+          const intervalId = setInterval(async () => {
+            const currentGame = await gameManager.getGameState(gameId);
+            if (!currentGame || currentGame.status !== 'waiting') {
+              clearGameInterval(gameId);
+              return;
+            }
+            emitGameUpdate(gameId, currentGame);
+          }, 1000); // Обновляем каждую секунду
+          
+          gameIntervals.set(gameId, intervalId);
+          console.log(`⏱️ Интервал автостарта запущен для игры ${gameId}`);
+        }
       } else {
         console.log('❌ join_game failed:', result.error);
         socket.emit('error', { message: result.error });
@@ -124,24 +166,18 @@ io.on('connection', (socket) => {
       
       if (result.success) {
         const gameState = await gameManager.getGameState(gameId);
-        io.to(gameId).emit('game_started', gameState);
         
-        // Очищаем старый интервал если есть
-        clearGameInterval(gameId);
+        // Отправляем game_started с таймерами
+        const remainingTime = gameManager.getRemainingTime(gameState);
+        const autoStartRemaining = gameManager.getAutoStartRemainingTime(gameState);
+        io.to(gameId).emit('game_started', {
+          ...gameState,
+          remainingTime,
+          autoStartRemaining
+        });
         
-        // Устанавливаем интервал для отправки обновлений времени
-        const intervalId = setInterval(async () => {
-          const currentGame = await gameManager.getGameState(gameId);
-          if (!currentGame || currentGame.status !== 'playing') {
-            clearGameInterval(gameId);
-            return;
-          }
-          emitGameUpdate(gameId, currentGame);
-        }, 1000); // Обновляем каждую секунду
-        
-        // Сохраняем intervalId в Map для очистки
-        gameIntervals.set(gameId, intervalId);
-        console.log(`⏱️ Интервал обновления запущен для игры ${gameId}`);
+        // Запускаем интервал обновления
+        startGameInterval(gameId);
       } else {
         socket.emit('error', { message: result.error });
       }
@@ -183,6 +219,29 @@ io.on('connection', (socket) => {
       }
     } catch (error) {
       console.error('Ошибка stand:', error);
+    }
+  });
+
+  socket.on('extend_auto_start', async ({ gameId, userId }) => {
+    try {
+      const result = await gameManager.extendAutoStart(gameId, userId);
+      
+      if (result.success) {
+        const gameState = await gameManager.getGameState(gameId);
+        const autoStartRemaining = gameManager.getAutoStartRemainingTime(gameState);
+        io.to(gameId).emit('auto_start_extended', { 
+          newTime: result.newTime,
+          remainingTime: autoStartRemaining
+        });
+        io.to(gameId).emit('game_update', {
+          ...gameState,
+          autoStartRemaining
+        });
+      } else {
+        socket.emit('error', { message: result.error });
+      }
+    } catch (error) {
+      console.error('Ошибка extend_auto_start:', error);
     }
   });
 

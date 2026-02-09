@@ -3,3 +3,4 @@ node_modules/
 *.log
 messages_*.txt
 history_*.txt
+.md

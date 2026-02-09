@@ -2,13 +2,18 @@ import Player from './models/Player.js';
 import { isDatabaseConnected } from './database.js';
 
 export class GameManager {
-  constructor(redis, io = null) {
+  constructor(redis, io = null, startGameInterval = null) {
     this.redis = redis;
     this.io = io; // Socket.io instance для отправки событий
+    this.startGameInterval = startGameInterval; // Функция для запуска интервала
     this.MIN_BET = 20;
     this.MAX_BET = 300;
     this.TURN_TIMEOUT = 30000; // 30 секунд на ход
+    this.AUTO_START_TIMEOUT = 120000; // 120 секунд до автостарта
+    this.MAX_AUTO_START_TIMEOUT = 180000; // Максимум 180 секунд
+    this.EXTEND_COOLDOWN = 5000; // Кулдаун между продлениями 5 секунд
     this.turnTimers = new Map(); // Хранилище таймеров для каждой игры
+    this.autoStartTimers = new Map(); // Хранилище таймеров автостарта
   }
 
   async createGame(gameType = 'blackjack') {
@@ -21,9 +26,12 @@ export class GameManager {
       deck: this.createDeck(),
       currentPlayerIndex: 0,
       dealer: gameType === 'blackjack' ? { cards: [], score: 0 } : null,
+      creator: null, // ID создателя (первый присоединившийся)
+      autoStartTime: null, // Время автостарта
+      lastExtendTime: null, // Время последнего продления
       createdAt: Date.now()
     };
-    
+
     await this.redis.set(`game:${gameId}`, JSON.stringify(game), { EX: 3600 });
     return gameId;
   }
@@ -32,13 +40,13 @@ export class GameManager {
     const suits = ['hearts', 'diamonds', 'clubs', 'spades'];
     const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
     const deck = [];
-    
+
     for (const suit of suits) {
       for (const rank of ranks) {
         deck.push({ suit, rank });
       }
     }
-    
+
     return this.shuffleDeck(deck);
   }
 
@@ -54,7 +62,7 @@ export class GameManager {
   calculateScore(cards) {
     let score = 0;
     let aces = 0;
-    
+
     for (const card of cards) {
       if (card.rank === 'A') {
         aces++;
@@ -65,12 +73,12 @@ export class GameManager {
         score += parseInt(card.rank);
       }
     }
-    
+
     while (score > 21 && aces > 0) {
       score -= 10;
       aces--;
     }
-    
+
     return score;
   }
 
@@ -85,25 +93,25 @@ export class GameManager {
 
   async joinGame(gameId, userId, username, photoUrl, bet = 20) {
     const game = await this.getGameState(gameId);
-    
+
     if (!game) {
       return { success: false, error: 'Игра не найдена' };
     }
-    
+
     // Проверяем есть ли игрок уже в игре
     const existingPlayer = game.players.find(p => p.userId === userId);
-    
+
     if (existingPlayer) {
       // Игрок уже в игре - разрешаем переподключение
       console.log(`🔄 Игрок ${username} переподключается к игре ${gameId}`);
       return { success: true, reconnected: true };
     }
-    
+
     // Новый игрок может присоединиться только если игра ещё не началась
     if (game.status !== 'waiting') {
       return { success: false, error: 'Игра уже началась' };
     }
-    
+
     if (game.players.length >= 6) {
       return { success: false, error: 'Игра заполнена (макс. 6 игроков)' };
     }
@@ -112,7 +120,7 @@ export class GameManager {
     if (bet < this.MIN_BET) {
       return { success: false, error: `Минимальная ставка ${this.MIN_BET}₽` };
     }
-    
+
     if (bet > this.MAX_BET) {
       return { success: false, error: `Максимальная ставка ${this.MAX_BET}₽` };
     }
@@ -123,14 +131,14 @@ export class GameManager {
       try {
         const player = await Player.getOrCreate(userId, username);
         playerBalance = player.balance;
-        
+
         if (!player.canBet(bet)) {
-          return { 
-            success: false, 
-            error: `Недостаточно средств. Баланс: ${player.balance}₽` 
+          return {
+            success: false,
+            error: `Недостаточно средств. Баланс: ${player.balance}₽`
           };
         }
-        
+
         // Списываем ставку сразу при присоединении
         player.balance -= bet;
         await player.save();
@@ -144,7 +152,13 @@ export class GameManager {
       // Если MongoDB не подключена, вычитаем локально
       playerBalance -= bet;
     }
-    
+
+    // Устанавливаем создателя (первый присоединившийся)
+    if (game.players.length === 0) {
+      game.creator = userId;
+      console.log(`👑 ${username} стал создателем игры ${gameId}`);
+    }
+
     // Добавляем нового игрока
     game.players.push({
       userId,
@@ -156,76 +170,99 @@ export class GameManager {
       bet: bet,
       balance: playerBalance
     });
-    
-    await this.saveGameState(game);
+
+    // Запускаем таймер автостарта если это второй игрок
+    if (game.players.length === 2 && !game.autoStartTime) {
+      game.autoStartTime = Date.now() + this.AUTO_START_TIMEOUT;
+      await this.saveGameState(game);
+      this.startAutoStartTimer(gameId);
+      console.log(`⏰ Запущен таймер автостарта для игры ${gameId} (120 секунд)`);
+    } else {
+      await this.saveGameState(game);
+    }
+
     console.log(`✅ ${username} присоединился к игре со ставкой ${bet}₽`);
     return { success: true, reconnected: false };
   }
 
   async startGame(gameId, userId) {
     const game = await this.getGameState(gameId);
-    
+
     if (!game) {
       return { success: false, error: 'Игра не найдена' };
     }
-    
+
     if (game.players.length < 2) {
       return { success: false, error: 'Нужно минимум 2 игрока' };
     }
-    
+
     if (game.status !== 'waiting') {
       return { success: false, error: 'Игра уже началась' };
     }
-    
+
+    // Проверяем что это создатель игры
+    if (game.creator && game.creator !== userId) {
+      return { success: false, error: 'Только создатель может начать игру' };
+    }
+
+    // Останавливаем таймер автостарта
+    this.clearAutoStartTimer(gameId);
+
     game.status = 'playing';
     game.currentPlayerIndex = 0;
-    
+
+    // Очищаем старое время хода (если было)
+    delete game.turnStartTime;
+
     // Раздаем по 2 карты каждому игроку
     for (const player of game.players) {
       player.cards = [game.deck.pop(), game.deck.pop()];
       player.score = this.calculateScore(player.cards);
     }
-    
+
     // Дилеру 2 карты только в режиме blackjack
     if (game.gameType === 'blackjack') {
       game.dealer.cards = [game.deck.pop(), game.deck.pop()];
       game.dealer.score = this.calculateScore([game.dealer.cards[0]]);
     }
-    
-    // Устанавливаем время начала хода для первого игрока
+
+    // Устанавливаем время начала хода для первого игрока СЕЙЧАС
     game.turnStartTime = Date.now();
-    
+
+    console.log(`⏱️ Установлено turnStartTime для игры ${gameId}: ${game.turnStartTime}`);
+
     await this.saveGameState(game);
-    
+
     // Запускаем таймер для первого игрока
     this.startTurnTimer(gameId);
-    
+
+    console.log(`🎮 Игра ${gameId} началась!`);
     return { success: true };
   }
 
   async hit(gameId, userId) {
     const game = await this.getGameState(gameId);
-    
+
     if (!game || game.status !== 'playing') {
       return { success: false };
     }
-    
+
     const player = game.players.find(p => p.userId === userId);
     if (!player || player.status !== 'active') {
       return { success: false };
     }
-    
+
     const currentPlayer = game.players[game.currentPlayerIndex];
     if (currentPlayer.userId !== userId) {
       return { success: false, error: 'Не ваш ход' };
     }
-    
+
     // Останавливаем таймер текущего хода
     this.clearTurnTimer(gameId);
-    
+
     player.cards.push(game.deck.pop());
     player.score = this.calculateScore(player.cards);
-    
+
     let busted = false;
     if (player.score > 21) {
       player.status = 'busted';
@@ -237,29 +274,29 @@ export class GameManager {
       // И запускаем таймер снова
       this.startTurnTimer(gameId);
     }
-    
+
     await this.saveGameState(game);
     return { success: true, busted };
   }
 
   async stand(gameId, userId, isTimeout = false) {
     const game = await this.getGameState(gameId);
-    
+
     if (!game || game.status !== 'playing') {
       return { success: false };
     }
-    
+
     const player = game.players.find(p => p.userId === userId);
     if (!player || player.status !== 'active') {
       return { success: false };
     }
-    
+
     // Останавливаем таймер текущего хода
     this.clearTurnTimer(gameId);
-    
+
     player.status = 'stand';
     const gameOver = await this.moveToNextPlayer(game);
-    
+
     await this.saveGameState(game);
     return { success: true, gameOver, isTimeout };
   }
@@ -267,9 +304,9 @@ export class GameManager {
   async moveToNextPlayer(game) {
     // Останавливаем таймер предыдущего игрока
     this.clearTurnTimer(game.id);
-    
+
     game.currentPlayerIndex++;
-    
+
     // Пропускаем игроков которые уже завершили ход
     while (game.currentPlayerIndex < game.players.length) {
       const player = game.players[game.currentPlayerIndex];
@@ -282,7 +319,7 @@ export class GameManager {
       }
       game.currentPlayerIndex++;
     }
-    
+
     // Все игроки завершили
     if (game.gameType === 'blackjack') {
       // В блекджеке - ход дилера
@@ -291,13 +328,13 @@ export class GameManager {
     // В обоих режимах определяем победителей
     await this.determineWinners(game);
     game.status = 'finished';
-    
+
     return true;
   }
 
   async dealerTurn(game) {
     game.dealer.score = this.calculateScore(game.dealer.cards);
-    
+
     while (game.dealer.score < 17) {
       game.dealer.cards.push(game.deck.pop());
       game.dealer.score = this.calculateScore(game.dealer.cards);
@@ -309,7 +346,7 @@ export class GameManager {
       // Режим блекджек - игроки против дилера
       const dealerScore = game.dealer.score;
       const dealerBusted = dealerScore > 21;
-      
+
       for (const player of game.players) {
         if (player.status === 'busted') {
           player.result = 'lose';
@@ -328,13 +365,13 @@ export class GameManager {
       // Находим максимальный счет среди не перебравших игроков
       let maxScore = 0;
       const activePlayers = game.players.filter(p => p.status !== 'busted');
-      
+
       for (const player of activePlayers) {
         if (player.score > maxScore) {
           maxScore = player.score;
         }
       }
-      
+
       // Определяем победителей
       for (const player of game.players) {
         if (player.status === 'busted') {
@@ -370,10 +407,10 @@ export class GameManager {
               dbPlayer.balance += player.bet;
             }
             // При lose ничего не делаем - ставка уже списана
-            
+
             dbPlayer.gamesPlayed += 1;
             await dbPlayer.save();
-            
+
             // Обновляем баланс в gameState
             player.balance = dbPlayer.balance;
             console.log(`💰 ${player.username} ${player.result}: баланс ${player.balance}₽`);
@@ -394,7 +431,7 @@ export class GameManager {
         // При lose ничего не делаем - ставка уже списана
       }
     }
-    
+
     // ВАЖНО: Очищаем таймер после завершения игры
     this.clearTurnTimer(game.id);
     console.log(`🧹 Игра ${game.id} завершена, ресурсы очищены`);
@@ -404,12 +441,12 @@ export class GameManager {
   startTurnTimer(gameId) {
     // Очищаем предыдущий таймер если есть
     this.clearTurnTimer(gameId);
-    
+
     const timer = setTimeout(async () => {
       console.log(`⏰ Время вышло для игры ${gameId}`);
       await this.handleTurnTimeout(gameId);
     }, this.TURN_TIMEOUT);
-    
+
     this.turnTimers.set(gameId, timer);
     console.log(`⏱️ Таймер запущен для игры ${gameId} (30 секунд)`);
   }
@@ -425,47 +462,47 @@ export class GameManager {
 
   async handleTurnTimeout(gameId) {
     const game = await this.getGameState(gameId);
-    
+
     if (!game || game.status !== 'playing') {
       return;
     }
-    
+
     const currentPlayer = game.players[game.currentPlayerIndex];
     if (!currentPlayer || currentPlayer.status !== 'active') {
       return;
     }
-    
+
     console.log(`⏰ Автоматический пас для игрока ${currentPlayer.username}`);
-    
+
     // Автоматически делаем stand для игрока
     currentPlayer.status = 'stand';
     const gameOver = await this.moveToNextPlayer(game);
-    
+
     await this.saveGameState(game);
-    
+
     // Отправляем обновление через socket.io если доступно
     if (this.io) {
-      this.io.to(gameId).emit('turn_timeout', { 
+      this.io.to(gameId).emit('turn_timeout', {
         userId: currentPlayer.userId,
         username: currentPlayer.username
       });
-      
+
       const updatedGame = await this.getGameState(gameId);
       const remainingTime = this.getRemainingTime(updatedGame);
       this.io.to(gameId).emit('game_update', {
         ...updatedGame,
         remainingTime
       });
-      
+
       if (gameOver) {
         this.io.to(gameId).emit('game_over', updatedGame);
       }
     }
-    
+
     // Возвращаем результат для отправки через socket
-    return { 
-      success: true, 
-      gameOver, 
+    return {
+      success: true,
+      gameOver,
       isTimeout: true,
       userId: currentPlayer.userId,
       gameState: game
@@ -477,17 +514,173 @@ export class GameManager {
     if (!game.turnStartTime || game.status !== 'playing') {
       return 0;
     }
-    
+
     const elapsed = Date.now() - game.turnStartTime;
     const remaining = Math.max(0, this.TURN_TIMEOUT - elapsed);
+    const remainingSeconds = Math.ceil(remaining / 1000);
+
+    // Логируем только если время странное
+    if (remainingSeconds < 25 && elapsed < 5000) {
+      console.log(`⚠️ Странное время: elapsed=${elapsed}ms, remaining=${remainingSeconds}s, turnStartTime=${game.turnStartTime}, now=${Date.now()}`);
+    }
+
+    return remainingSeconds; // Возвращаем в секундах
+  }
+
+  // Методы управления таймером автостарта
+  startAutoStartTimer(gameId) {
+    // Очищаем предыдущий таймер если есть
+    this.clearAutoStartTimer(gameId);
+
+    const timer = setTimeout(async () => {
+      console.log(`⏰ Автостарт игры ${gameId}`);
+      await this.handleAutoStart(gameId);
+    }, this.AUTO_START_TIMEOUT);
+
+    this.autoStartTimers.set(gameId, timer);
+    console.log(`⏱️ Таймер автостарта запущен для игры ${gameId} (120 секунд)`);
+  }
+
+  clearAutoStartTimer(gameId) {
+    const timer = this.autoStartTimers.get(gameId);
+    if (timer) {
+      clearTimeout(timer);
+      this.autoStartTimers.delete(gameId);
+      console.log(`⏹️ Таймер автостарта остановлен для игры ${gameId}`);
+    }
+  }
+
+  async handleAutoStart(gameId) {
+    const game = await this.getGameState(gameId);
+
+    if (!game || game.status !== 'waiting') {
+      return;
+    }
+
+    if (game.players.length < 2) {
+      console.log(`⚠️ Недостаточно игроков для автостарта игры ${gameId}`);
+      return;
+    }
+
+    console.log(`🎮 Автостарт игры ${gameId} с ${game.players.length} игроками`);
+
+    // Запускаем игру (используем ID создателя для логов, но проверку пропускаем)
+    game.status = 'playing';
+    game.currentPlayerIndex = 0;
+
+    // Очищаем старое время хода (если было)
+    delete game.turnStartTime;
+
+    // Раздаем по 2 карты каждому игроку
+    for (const player of game.players) {
+      player.cards = [game.deck.pop(), game.deck.pop()];
+      player.score = this.calculateScore(player.cards);
+    }
+
+    // Дилеру 2 карты только в режиме blackjack
+    if (game.gameType === 'blackjack') {
+      game.dealer.cards = [game.deck.pop(), game.deck.pop()];
+      game.dealer.score = this.calculateScore([game.dealer.cards[0]]);
+    }
+
+    // Устанавливаем время начала хода для первого игрока СЕЙЧАС
+    game.turnStartTime = Date.now();
+
+    console.log(`⏱️ Установлено turnStartTime для автостарта игры ${gameId}: ${game.turnStartTime}`);
+
+    await this.saveGameState(game);
+
+    // Запускаем таймер для первого игрока
+    this.startTurnTimer(gameId);
+
+    // Отправляем обновление через socket.io
+    if (this.io) {
+      // Вычисляем remainingTime для отправки
+      const remainingTime = this.getRemainingTime(game);
+      const autoStartRemaining = this.getAutoStartRemainingTime(game);
+
+      this.io.to(gameId).emit('game_started', {
+        ...game,
+        remainingTime,
+        autoStartRemaining
+      });
+      this.io.to(gameId).emit('auto_start_triggered', {
+        message: 'Игра началась автоматически'
+      });
+
+      // ВАЖНО: Запускаем интервал для обновления таймера!
+      if (this.startGameInterval) {
+        this.startGameInterval(gameId);
+        console.log(`🔄 Интервал запущен для автостарта игры ${gameId}`);
+      }
+    }
+  }
+
+  // Метод для продления времени автостарта
+  async extendAutoStart(gameId, userId) {
+    const game = await this.getGameState(gameId);
+
+    if (!game) {
+      return { success: false, error: 'Игра не найдена' };
+    }
+
+    if (game.status !== 'waiting') {
+      return { success: false, error: 'Игра уже началась' };
+    }
+
+    // Проверяем что это создатель
+    if (game.creator !== userId) {
+      return { success: false, error: 'Только создатель может продлить время' };
+    }
+
+    // Проверяем кулдаун (5 секунд между продлениями)
+    if (game.lastExtendTime && Date.now() - game.lastExtendTime < this.EXTEND_COOLDOWN) {
+      const remainingCooldown = Math.ceil((this.EXTEND_COOLDOWN - (Date.now() - game.lastExtendTime)) / 1000);
+      return { success: false, error: `Подождите ${remainingCooldown}с` };
+    }
+
+    // Проверяем максимальное время
+    const currentRemaining = game.autoStartTime - Date.now();
+    const newRemaining = currentRemaining + 30000; // +30 секунд
+
+    if (newRemaining > this.MAX_AUTO_START_TIMEOUT) {
+      return { success: false, error: 'Достигнут максимум времени (180 секунд)' };
+    }
+
+    // Продлеваем время
+    game.autoStartTime = Date.now() + newRemaining;
+    game.lastExtendTime = Date.now();
+
+    await this.saveGameState(game);
+
+    // Перезапускаем таймер
+    this.clearAutoStartTimer(gameId);
+    const timer = setTimeout(async () => {
+      await this.handleAutoStart(gameId);
+    }, newRemaining);
+    this.autoStartTimers.set(gameId, timer);
+
+    console.log(`⏰ Время автостарта продлено на 30 секунд для игры ${gameId}`);
+
+    return { success: true, newTime: game.autoStartTime };
+  }
+
+  // Метод для получения оставшегося времени до автостарта
+  getAutoStartRemainingTime(game) {
+    if (!game.autoStartTime || game.status !== 'waiting') {
+      return 0;
+    }
+
+    const remaining = Math.max(0, game.autoStartTime - Date.now());
     return Math.ceil(remaining / 1000); // Возвращаем в секундах
   }
 
   // Метод для полной очистки игры (вызывается при завершении)
   async cleanupGame(gameId) {
-    // Очищаем таймер
+    // Очищаем таймеры
     this.clearTurnTimer(gameId);
-    
+    this.clearAutoStartTimer(gameId);
+
     // Можно добавить дополнительную логику очистки
     console.log(`🧹 Полная очистка игры ${gameId}`);
   }
@@ -496,7 +689,9 @@ export class GameManager {
   getStats() {
     return {
       activeTimers: this.turnTimers.size,
-      timerGameIds: Array.from(this.turnTimers.keys())
+      timerGameIds: Array.from(this.turnTimers.keys()),
+      activeAutoStartTimers: this.autoStartTimers.size,
+      autoStartGameIds: Array.from(this.autoStartTimers.keys())
     };
   }
 }

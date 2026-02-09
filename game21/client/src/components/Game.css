@@ -527,3 +527,66 @@
     transform: translate(-50%, -50%) scale(0.8);
   }
 }
+
+
+/* Стили для автостарта */
+.auto-start-timer {
+  margin: 0.75rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.timer-display {
+  background: var(--tg-theme-secondary-bg-color, #2a2a2a);
+  border: 2px solid #4caf50;
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #4caf50;
+  text-align: center;
+  transition: all 0.3s ease;
+}
+
+.timer-display.warning {
+  border-color: #ff9800;
+  color: #ff9800;
+  animation: pulse-warning 1s ease-in-out infinite;
+}
+
+.btn-extend {
+  background: #ff9800;
+  color: white;
+  padding: 0.6rem 1.2rem;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.btn-extend:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-extend:not(:disabled):active {
+  transform: scale(0.95);
+}
+
+.creator-info {
+  color: var(--tg-theme-hint-color, #999);
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.waiting-creator {
+  text-align: center;
+  padding: 0.75rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--tg-theme-hint-color, #999);
+  background: var(--tg-theme-secondary-bg-color, #2a2a2a);
+  border-radius: 10px;
+}
