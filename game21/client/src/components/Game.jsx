@@ -181,7 +181,7 @@ function Game({ gameState, socket, user, gameId }) {
 
       {/* Другие игроки */}
       {otherPlayers.length > 0 && (
-        <div className="other-players">
+        <div className={`other-players ${gameState.gameType === 'pvp' ? 'pvp-mode' : ''}`}>
           {otherPlayers.map((player) => {
             const resultIcon = isFinished && player.result 
               ? (player.result === 'win' ? '🏆' : player.result === 'push' ? '🤝' : '❌')
