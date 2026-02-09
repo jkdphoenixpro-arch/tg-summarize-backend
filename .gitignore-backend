@@ -1,0 +1,65 @@
+# ========================================
+# .gitignore для БЭКЕНД репозитория
+# (Railway deployment)
+# ========================================
+
+# Dependencies
+node_modules/
+game21/node_modules/
+game21/server/node_modules/
+
+# Environment variables
+.env
+.env.local
+.env.production
+game21/server/.env
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Messages and history
+messages.txt
+messages_*.txt
+history_*.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary
+*.tmp
+.cache/
+
+# ========================================
+# НЕ НУЖНО на бэкенде (уже на Cloudflare)
+# ========================================
+game21/client/
+
+# Windows scripts
+*.bat
+
+# Documentation (кроме основных)
+*.md
+!README.md
+!CHANGELOG.md
+
+# Test files
+*.test.js
+*.spec.js
+__tests__/
+coverage/
+
+# Telegram sessions
+*.session
+*.session-journal
+
+# Database dumps
+dump.rdb
+data/
+mongodb/
