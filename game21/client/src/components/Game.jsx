@@ -1,12 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Card from './Card';
 import { hapticFeedback } from '../utils/telegram';
+import { playSound } from '../utils/sounds';
 import './Game.css';
 
 function Game({ gameState, socket, user, gameId }) {
   const [canAct, setCanAct] = useState(false);
   const [remainingTime, setRemainingTime] = useState(30);
   const [showTimeoutMessage, setShowTimeoutMessage] = useState(false);
+  const prevGameStatusRef = useRef(null);
+  const prevMyCardsLengthRef = useRef(0);
+  const prevResultRef = useRef(null);
 
   useEffect(() => {
     if (!gameState || gameState.status !== 'playing') {
@@ -32,6 +36,7 @@ function Game({ gameState, socket, user, gameId }) {
     // Слушаем событие таймаута
     const handleTimeout = ({ userId }) => {
       if (userId === user.userId) {
+        playSound('pass'); // Звук паса при таймауте
         setShowTimeoutMessage(true);
         setTimeout(() => setShowTimeoutMessage(false), 3000);
       }
@@ -44,12 +49,52 @@ function Game({ gameState, socket, user, gameId }) {
     };
   }, [socket, user]);
 
+  // Звук при начале игры
+  useEffect(() => {
+    if (gameState?.status === 'playing' && prevGameStatusRef.current !== 'playing') {
+      playSound('gameReady');
+    }
+    prevGameStatusRef.current = gameState?.status;
+  }, [gameState?.status]);
+
+  // Звук при взятии карты
+  useEffect(() => {
+    const myPlayer = gameState?.players?.find(p => p.userId === user.userId);
+    const currentCardsLength = myPlayer?.cards?.length || 0;
+    
+    // Если карт стало больше и это не начальная раздача (больше 2 карт)
+    if (currentCardsLength > prevMyCardsLengthRef.current && currentCardsLength > 2) {
+      playSound('cardFlick');
+    }
+    
+    prevMyCardsLengthRef.current = currentCardsLength;
+  }, [gameState?.players, user.userId]);
+
+  // Звук при победе/проигрыше
+  useEffect(() => {
+    const myPlayer = gameState?.players?.find(p => p.userId === user.userId);
+    const currentResult = myPlayer?.result;
+    
+    if (currentResult && currentResult !== prevResultRef.current) {
+      if (currentResult === 'win') {
+        playSound('win');
+      } else if (currentResult === 'lose') {
+        playSound('lose');
+      }
+      // При 'push' звук не играем
+    }
+    
+    prevResultRef.current = currentResult;
+  }, [gameState?.players, user.userId]);
+
   const handleHit = () => {
+    playSound('cardFlick'); // Звук взятия карты
     hapticFeedback('light');
     socket.emit('hit', { gameId, userId: user.userId });
   };
 
   const handleStand = () => {
+    playSound('pass'); // Звук паса
     hapticFeedback('medium');
     socket.emit('stand', { gameId, userId: user.userId });
   };

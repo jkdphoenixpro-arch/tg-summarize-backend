@@ -376,6 +376,7 @@
     font-size: 1.3rem;
   }
 }
+
 /* Т
 аймер хода */
 .turn-timer-container {
@@ -444,10 +445,13 @@
 
 /* Анимации */
 @keyframes pulse-warning {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: scale(1);
     opacity: 1;
   }
+
   50% {
     transform: scale(1.05);
     opacity: 0.9;
@@ -455,10 +459,13 @@
 }
 
 @keyframes pulse-critical {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: scale(1);
     box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7);
   }
+
   50% {
     transform: scale(1.08);
     box-shadow: 0 0 10px 5px rgba(255, 68, 68, 0);
@@ -470,14 +477,17 @@
     opacity: 0;
     transform: translate(-50%, -50%) scale(0.8);
   }
+
   10% {
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
   }
+
   90% {
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
   }
+
   100% {
     opacity: 0;
     transform: translate(-50%, -50%) scale(0.8);
