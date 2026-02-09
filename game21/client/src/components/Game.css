@@ -376,3 +376,110 @@
     font-size: 1.3rem;
   }
 }
+/* Т
+аймер хода */
+.turn-timer-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+  flex-shrink: 0;
+}
+
+.turn-timer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--tg-theme-secondary-bg-color, #2a2a2a);
+  border-radius: 20px;
+  padding: 0.5rem 1rem;
+  border: 2px solid var(--timer-color, #4caf50);
+  transition: all 0.3s ease;
+}
+
+.turn-timer.warning {
+  animation: pulse-warning 1s ease-in-out infinite;
+}
+
+.turn-timer.critical {
+  animation: pulse-critical 0.5s ease-in-out infinite;
+  border-width: 3px;
+}
+
+.timer-icon {
+  font-size: 1.2rem;
+}
+
+.timer-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--timer-color, #4caf50);
+  min-width: 40px;
+  text-align: center;
+}
+
+.timer-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--tg-theme-button-color, #3390ec);
+}
+
+/* Сообщение о таймауте */
+.timeout-message {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 68, 68, 0.95);
+  color: white;
+  padding: 1rem 1.5rem;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 1.1rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  animation: fadeInOut 3s ease-in-out;
+}
+
+/* Анимации */
+@keyframes pulse-warning {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.9;
+  }
+}
+
+@keyframes pulse-critical {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7);
+  }
+  50% {
+    transform: scale(1.08);
+    box-shadow: 0 0 10px 5px rgba(255, 68, 68, 0);
+  }
+}
+
+@keyframes fadeInOut {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  90% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+  }
+}

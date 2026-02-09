@@ -2,10 +2,13 @@ import Player from './models/Player.js';
 import { isDatabaseConnected } from './database.js';
 
 export class GameManager {
-  constructor(redis) {
+  constructor(redis, io = null) {
     this.redis = redis;
+    this.io = io; // Socket.io instance для отправки событий
     this.MIN_BET = 20;
     this.MAX_BET = 300;
+    this.TURN_TIMEOUT = 30000; // 30 секунд на ход
+    this.turnTimers = new Map(); // Хранилище таймеров для каждой игры
   }
 
   async createGame() {
@@ -186,7 +189,14 @@ export class GameManager {
     game.dealer.cards = [game.deck.pop(), game.deck.pop()];
     game.dealer.score = this.calculateScore([game.dealer.cards[0]]);
     
+    // Устанавливаем время начала хода для первого игрока
+    game.turnStartTime = Date.now();
+    
     await this.saveGameState(game);
+    
+    // Запускаем таймер для первого игрока
+    this.startTurnTimer(gameId);
+    
     return { success: true };
   }
 
@@ -207,6 +217,9 @@ export class GameManager {
       return { success: false, error: 'Не ваш ход' };
     }
     
+    // Останавливаем таймер текущего хода
+    this.clearTurnTimer(gameId);
+    
     player.cards.push(game.deck.pop());
     player.score = this.calculateScore(player.cards);
     
@@ -215,13 +228,18 @@ export class GameManager {
       player.status = 'busted';
       busted = true;
       await this.moveToNextPlayer(game);
+    } else {
+      // Если игрок не перебрал, обновляем время начала хода
+      game.turnStartTime = Date.now();
+      // И запускаем таймер снова
+      this.startTurnTimer(gameId);
     }
     
     await this.saveGameState(game);
     return { success: true, busted };
   }
 
-  async stand(gameId, userId) {
+  async stand(gameId, userId, isTimeout = false) {
     const game = await this.getGameState(gameId);
     
     if (!game || game.status !== 'playing') {
@@ -233,20 +251,30 @@ export class GameManager {
       return { success: false };
     }
     
+    // Останавливаем таймер текущего хода
+    this.clearTurnTimer(gameId);
+    
     player.status = 'stand';
     const gameOver = await this.moveToNextPlayer(game);
     
     await this.saveGameState(game);
-    return { success: true, gameOver };
+    return { success: true, gameOver, isTimeout };
   }
 
   async moveToNextPlayer(game) {
+    // Останавливаем таймер предыдущего игрока
+    this.clearTurnTimer(game.id);
+    
     game.currentPlayerIndex++;
     
     // Пропускаем игроков которые уже завершили ход
     while (game.currentPlayerIndex < game.players.length) {
       const player = game.players[game.currentPlayerIndex];
       if (player.status === 'active') {
+        // Устанавливаем время начала хода для следующего игрока
+        game.turnStartTime = Date.now();
+        // Запускаем таймер для следующего игрока
+        this.startTurnTimer(game.id);
         return false;
       }
       game.currentPlayerIndex++;
@@ -326,5 +354,109 @@ export class GameManager {
         // При lose ничего не делаем - ставка уже списана
       }
     }
+    
+    // ВАЖНО: Очищаем таймер после завершения игры
+    this.clearTurnTimer(game.id);
+    console.log(`🧹 Игра ${game.id} завершена, ресурсы очищены`);
+  }
+
+  // Методы управления таймерами
+  startTurnTimer(gameId) {
+    // Очищаем предыдущий таймер если есть
+    this.clearTurnTimer(gameId);
+    
+    const timer = setTimeout(async () => {
+      console.log(`⏰ Время вышло для игры ${gameId}`);
+      await this.handleTurnTimeout(gameId);
+    }, this.TURN_TIMEOUT);
+    
+    this.turnTimers.set(gameId, timer);
+    console.log(`⏱️ Таймер запущен для игры ${gameId} (30 секунд)`);
+  }
+
+  clearTurnTimer(gameId) {
+    const timer = this.turnTimers.get(gameId);
+    if (timer) {
+      clearTimeout(timer);
+      this.turnTimers.delete(gameId);
+      console.log(`⏹️ Таймер остановлен для игры ${gameId}`);
+    }
+  }
+
+  async handleTurnTimeout(gameId) {
+    const game = await this.getGameState(gameId);
+    
+    if (!game || game.status !== 'playing') {
+      return;
+    }
+    
+    const currentPlayer = game.players[game.currentPlayerIndex];
+    if (!currentPlayer || currentPlayer.status !== 'active') {
+      return;
+    }
+    
+    console.log(`⏰ Автоматический пас для игрока ${currentPlayer.username}`);
+    
+    // Автоматически делаем stand для игрока
+    currentPlayer.status = 'stand';
+    const gameOver = await this.moveToNextPlayer(game);
+    
+    await this.saveGameState(game);
+    
+    // Отправляем обновление через socket.io если доступно
+    if (this.io) {
+      this.io.to(gameId).emit('turn_timeout', { 
+        userId: currentPlayer.userId,
+        username: currentPlayer.username
+      });
+      
+      const updatedGame = await this.getGameState(gameId);
+      const remainingTime = this.getRemainingTime(updatedGame);
+      this.io.to(gameId).emit('game_update', {
+        ...updatedGame,
+        remainingTime
+      });
+      
+      if (gameOver) {
+        this.io.to(gameId).emit('game_over', updatedGame);
+      }
+    }
+    
+    // Возвращаем результат для отправки через socket
+    return { 
+      success: true, 
+      gameOver, 
+      isTimeout: true,
+      userId: currentPlayer.userId,
+      gameState: game
+    };
+  }
+
+  // Метод для получения оставшегося времени хода
+  getRemainingTime(game) {
+    if (!game.turnStartTime || game.status !== 'playing') {
+      return 0;
+    }
+    
+    const elapsed = Date.now() - game.turnStartTime;
+    const remaining = Math.max(0, this.TURN_TIMEOUT - elapsed);
+    return Math.ceil(remaining / 1000); // Возвращаем в секундах
+  }
+
+  // Метод для полной очистки игры (вызывается при завершении)
+  async cleanupGame(gameId) {
+    // Очищаем таймер
+    this.clearTurnTimer(gameId);
+    
+    // Можно добавить дополнительную логику очистки
+    console.log(`🧹 Полная очистка игры ${gameId}`);
+  }
+
+  // Метод для получения статистики (для мониторинга)
+  getStats() {
+    return {
+      activeTimers: this.turnTimers.size,
+      timerGameIds: Array.from(this.turnTimers.keys())
+    };
   }
 }

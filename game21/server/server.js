@@ -63,6 +63,31 @@ if (process.env.USE_MEMORY_STORAGE === 'true') {
 
 const gameManager = new GameManager(redis);
 
+// Устанавливаем io после создания gameManager
+gameManager.io = io;
+
+// Хранилище интервалов для каждой игры (для очистки)
+const gameIntervals = new Map();
+
+// Функция для отправки обновлений игры с информацией о времени
+function emitGameUpdate(gameId, gameState) {
+  const remainingTime = gameManager.getRemainingTime(gameState);
+  io.to(gameId).emit('game_update', {
+    ...gameState,
+    remainingTime
+  });
+}
+
+// Функция для очистки интервала игры
+function clearGameInterval(gameId) {
+  const intervalId = gameIntervals.get(gameId);
+  if (intervalId) {
+    clearInterval(intervalId);
+    gameIntervals.delete(gameId);
+    console.log(`🧹 Интервал очищен для игры ${gameId}`);
+  }
+}
+
 console.log('🔧 Setting up Socket.io handlers...');
 
 // Socket.io обработчики
@@ -100,6 +125,23 @@ io.on('connection', (socket) => {
       if (result.success) {
         const gameState = await gameManager.getGameState(gameId);
         io.to(gameId).emit('game_started', gameState);
+        
+        // Очищаем старый интервал если есть
+        clearGameInterval(gameId);
+        
+        // Устанавливаем интервал для отправки обновлений времени
+        const intervalId = setInterval(async () => {
+          const currentGame = await gameManager.getGameState(gameId);
+          if (!currentGame || currentGame.status !== 'playing') {
+            clearGameInterval(gameId);
+            return;
+          }
+          emitGameUpdate(gameId, currentGame);
+        }, 1000); // Обновляем каждую секунду
+        
+        // Сохраняем intervalId в Map для очистки
+        gameIntervals.set(gameId, intervalId);
+        console.log(`⏱️ Интервал обновления запущен для игры ${gameId}`);
       } else {
         socket.emit('error', { message: result.error });
       }
@@ -114,7 +156,7 @@ io.on('connection', (socket) => {
       
       if (result.success) {
         const gameState = await gameManager.getGameState(gameId);
-        io.to(gameId).emit('game_update', gameState);
+        emitGameUpdate(gameId, gameState);
         
         if (result.busted) {
           io.to(gameId).emit('player_busted', { userId });
@@ -131,10 +173,12 @@ io.on('connection', (socket) => {
       
       if (result.success) {
         const gameState = await gameManager.getGameState(gameId);
-        io.to(gameId).emit('game_update', gameState);
+        emitGameUpdate(gameId, gameState);
         
         if (result.gameOver) {
           io.to(gameId).emit('game_over', gameState);
+          // Очищаем интервал после завершения игры
+          clearGameInterval(gameId);
         }
       }
     } catch (error) {
@@ -192,7 +236,65 @@ app.get('/api/player/:userId', async (req, res) => {
   }
 });
 
+// Мониторинг состояния сервера (для отладки)
+app.get('/api/stats', async (req, res) => {
+  try {
+    const stats = gameManager.getStats();
+    const intervalStats = {
+      activeIntervals: gameIntervals.size,
+      intervalGameIds: Array.from(gameIntervals.keys())
+    };
+    
+    res.json({ 
+      success: true, 
+      gameManager: stats,
+      intervals: intervalStats
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Периодическая очистка завершенных игр (каждые 5 минут)
+setInterval(async () => {
+  try {
+    console.log('🧹 Запуск периодической очистки...');
+    
+    // Получаем все ключи игр
+    const gameKeys = await redis.keys('game:*');
+    let cleanedCount = 0;
+    
+    for (const key of gameKeys) {
+      const gameData = await redis.get(key);
+      if (gameData) {
+        const game = JSON.parse(gameData);
+        
+        // Очищаем завершенные игры старше 10 минут
+        if (game.status === 'finished') {
+          const gameAge = Date.now() - game.createdAt;
+          const TEN_MINUTES = 10 * 60 * 1000;
+          
+          if (gameAge > TEN_MINUTES) {
+            await redis.del(key);
+            clearGameInterval(game.id);
+            gameManager.clearTurnTimer(game.id);
+            cleanedCount++;
+            console.log(`🗑️ Удалена завершенная игра ${game.id} (возраст: ${Math.round(gameAge / 60000)} мин)`);
+          }
+        }
+      }
+    }
+    
+    if (cleanedCount > 0) {
+      console.log(`✅ Очищено игр: ${cleanedCount}`);
+    }
+  } catch (error) {
+    console.error('❌ Ошибка периодической очистки:', error);
+  }
+}, 5 * 60 * 1000); // Каждые 5 минут
+
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
   console.log(`🎮 Game server запущен на порту ${PORT}`);
+  console.log(`📊 Статистика доступна на /api/stats`);
 });

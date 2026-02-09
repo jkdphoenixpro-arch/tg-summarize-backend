@@ -5,6 +5,8 @@ import './Game.css';
 
 function Game({ gameState, socket, user, gameId }) {
   const [canAct, setCanAct] = useState(false);
+  const [remainingTime, setRemainingTime] = useState(30);
+  const [showTimeoutMessage, setShowTimeoutMessage] = useState(false);
 
   useEffect(() => {
     if (!gameState || gameState.status !== 'playing') {
@@ -19,7 +21,28 @@ function Game({ gameState, socket, user, gameId }) {
       currentPlayer?.userId === user.userId && 
       myPlayer?.status === 'active'
     );
+
+    // Обновляем оставшееся время
+    if (gameState.remainingTime !== undefined) {
+      setRemainingTime(gameState.remainingTime);
+    }
   }, [gameState, user]);
+
+  useEffect(() => {
+    // Слушаем событие таймаута
+    const handleTimeout = ({ userId }) => {
+      if (userId === user.userId) {
+        setShowTimeoutMessage(true);
+        setTimeout(() => setShowTimeoutMessage(false), 3000);
+      }
+    };
+
+    socket.on('turn_timeout', handleTimeout);
+
+    return () => {
+      socket.off('turn_timeout', handleTimeout);
+    };
+  }, [socket, user]);
 
   const handleHit = () => {
     hapticFeedback('light');
@@ -42,6 +65,15 @@ function Game({ gameState, socket, user, gameId }) {
   const otherPlayers = gameState.players.filter(p => p.userId !== user.userId);
   const isWaiting = gameState.status === 'waiting';
   const isFinished = gameState.status === 'finished';
+  const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+  const isMyTurn = currentPlayer?.userId === user.userId && myPlayer?.status === 'active';
+
+  // Определяем цвет таймера
+  const getTimerColor = () => {
+    if (remainingTime <= 5) return '#ff4444';
+    if (remainingTime <= 10) return '#ff9800';
+    return '#4caf50';
+  };
 
   return (
     <div className="game">
@@ -49,6 +81,29 @@ function Game({ gameState, socket, user, gameId }) {
       {myPlayer && myPlayer.balance !== undefined && (
         <div className="game-balance">
           💰 Баланс: {myPlayer.balance}₽
+        </div>
+      )}
+
+      {/* Таймер хода */}
+      {gameState.status === 'playing' && !isFinished && (
+        <div className="turn-timer-container">
+          <div 
+            className={`turn-timer ${remainingTime <= 10 ? 'warning' : ''} ${remainingTime <= 5 ? 'critical' : ''}`}
+            style={{ '--timer-color': getTimerColor() }}
+          >
+            <div className="timer-icon">⏱️</div>
+            <div className="timer-value">{remainingTime}с</div>
+          </div>
+          {isMyTurn && (
+            <div className="timer-label">Ваш ход</div>
+          )}
+        </div>
+      )}
+
+      {/* Сообщение о таймауте */}
+      {showTimeoutMessage && (
+        <div className="timeout-message">
+          ⏰ Время вышло! Автоматический пас
         </div>
       )}
 
