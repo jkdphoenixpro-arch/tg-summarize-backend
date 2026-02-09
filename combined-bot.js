@@ -827,7 +827,8 @@ bot.command('opros', async (ctx) => {
     await createPollFromChat(ctx, chatId);
 });
 
-bot.command('game21', async (ctx) => {
+// Блекджек - игра с дилером
+bot.command('blackjack', async (ctx) => {
     // Работает только в группах
     if (ctx.chat.type === 'private') {
         return ctx.reply('❌ Эта команда работает только в группах');
@@ -837,7 +838,8 @@ bot.command('game21', async (ctx) => {
         // Создаем новую игру через API
         const response = await fetch(`${process.env.GAME_SERVER_URL || 'http://localhost:3001'}/api/create-game`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gameType: 'blackjack' })
         });
 
         const data = await response.json();
@@ -849,15 +851,72 @@ bot.command('game21', async (ctx) => {
         const gameId = data.gameId;
         const botUsername = ctx.botInfo.username;
 
-        console.log(`🎮 Создана игра ${gameId}`);
+        console.log(`🎮 Создана игра Блекджек ${gameId}`);
+
+        // В группе показываем кнопку для перехода в личку с ботом
+        await ctx.reply(
+            '🃏 Новая игра в Блекджек!\n\n' +
+            '🎯 Правила:\n' +
+            '• От 2 до 6 игроков\n' +
+            '• Играете против дилера\n' +
+            '• Цель: набрать 21 очко или близко к этому\n' +
+            '• Не перебрать 21!\n\n' +
+            '👇 Нажми кнопку чтобы присоединиться к игре',
+            {
+                reply_markup: {
+                    inline_keyboard: [[
+                        {
+                            text: '🎮 Подключиться к игре',
+                            url: `https://t.me/${botUsername}?start=${gameId}`
+                        }
+                    ]]
+                }
+            }
+        );
+
+        console.log(`✅ Сообщение отправлено в чат ${ctx.chat.id}`);
+
+    } catch (error) {
+        console.error('❌ Ошибка создания игры:', error);
+        ctx.reply('❌ Ошибка при создании игры. Убедись что игровой сервер запущен.');
+    }
+});
+
+// Game21 - игра игроков друг против друга (без дилера)
+bot.command('game21', async (ctx) => {
+    // Работает только в группах
+    if (ctx.chat.type === 'private') {
+        return ctx.reply('❌ Эта команда работает только в группах');
+    }
+
+    try {
+        // Создаем новую игру через API
+        const response = await fetch(`${process.env.GAME_SERVER_URL || 'http://localhost:3001'}/api/create-game`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gameType: 'pvp' })
+        });
+
+        const data = await response.json();
+
+        if (!data.success) {
+            return ctx.reply('❌ Не удалось создать игру');
+        }
+
+        const gameId = data.gameId;
+        const botUsername = ctx.botInfo.username;
+
+        console.log(`🎮 Создана игра 21 Очко (PvP) ${gameId}`);
 
         // В группе показываем кнопку для перехода в личку с ботом
         await ctx.reply(
             '🎴 Новая игра в 21 Очко!\n\n' +
             '🎯 Правила:\n' +
             '• От 2 до 6 игроков\n' +
-            '• Цель: набрать 21 очко или близко к этому\n' +
-            '• Не перебрать 21!\n\n' +
+            '• Играете друг против друга (без дилера)\n' +
+            '• Цель: набрать больше очков чем соперники\n' +
+            '• Не перебрать 21!\n' +
+            '• Побеждает игрок с наибольшим счетом ≤ 21\n\n' +
             '👇 Нажми кнопку чтобы присоединиться к игре',
             {
                 reply_markup: {
@@ -918,7 +977,8 @@ bot.start(async (ctx) => {
             '📋 Команды для группы:\n' +
             '/summarize - Суммаризировать последние сообщения\n' +
             '/opros - Создать мемный опрос на основе истории чата\n' +
-            '/game21 - Сыграть в 21 Очко (2-6 игроков)\n\n' +
+            '/game21 - Сыграть в 21 Очко PvP (игроки друг против друга)\n' +
+            '/blackjack - Сыграть в Блекджек (против дилера)\n\n' +
             'Нужно писать в группе!'
         );
     }

@@ -152,22 +152,32 @@ function Game({ gameState, socket, user, gameId }) {
         </div>
       )}
 
-      {/* Дилер */}
-      <div className="dealer-section">
-        <div className="dealer-info">
-          <span className="dealer-label">🎩 Дилер</span>
-          <span className="score">{gameState.dealer.score}</span>
+      {/* Дилер - только в режиме blackjack */}
+      {gameState.gameType === 'blackjack' && gameState.dealer && (
+        <div className="dealer-section">
+          <div className="dealer-info">
+            <span className="dealer-label">🎩 Дилер</span>
+            <span className="score">{gameState.dealer.score}</span>
+          </div>
+          <div className="cards-container">
+            {gameState.dealer.cards.map((card, idx) => (
+              <Card 
+                key={idx} 
+                card={card} 
+                hidden={!isFinished && idx === 1}
+              />
+            ))}
+          </div>
         </div>
-        <div className="cards-container">
-          {gameState.dealer.cards.map((card, idx) => (
-            <Card 
-              key={idx} 
-              card={card} 
-              hidden={!isFinished && idx === 1}
-            />
-          ))}
+      )}
+
+      {/* Заголовок для PvP режима - только в режиме ожидания */}
+      {gameState.gameType === 'pvp' && isWaiting && (
+        <div className="pvp-header">
+          <h2>🎴 21 Очко - PvP</h2>
+          <p className="pvp-subtitle">Играйте друг против друга!</p>
         </div>
-      </div>
+      )}
 
       {/* Другие игроки */}
       {otherPlayers.length > 0 && (
@@ -187,7 +197,8 @@ function Game({ gameState, socket, user, gameId }) {
                     {resultIcon && <span className="result-icon">{resultIcon}</span>}
                     {player.username}
                   </span>
-                  <span className="score">{player.score}</span>
+                  {/* Показываем счет только если игра началась */}
+                  {!isWaiting && <span className="score">{player.score}</span>}
                 </div>
                 {player.bet && (
                   <div className="player-bet">Ставка: {player.bet}₽</div>
@@ -222,7 +233,8 @@ function Game({ gameState, socket, user, gameId }) {
                 <div className="my-bet">Ставка: {myPlayer.bet}₽</div>
               )}
             </div>
-            <span className="score large">{myPlayer.score}</span>
+            {/* Показываем счет только если игра началась */}
+            {!isWaiting && <span className="score large">{myPlayer.score}</span>}
           </div>
           <div className="cards-container">
             {myPlayer.cards.map((card, idx) => (

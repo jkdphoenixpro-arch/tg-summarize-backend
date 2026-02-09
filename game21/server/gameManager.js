@@ -11,15 +11,16 @@ export class GameManager {
     this.turnTimers = new Map(); // Хранилище таймеров для каждой игры
   }
 
-  async createGame() {
+  async createGame(gameType = 'blackjack') {
     const gameId = `game_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const game = {
       id: gameId,
+      gameType: gameType, // 'blackjack' или 'pvp'
       players: [],
       status: 'waiting', // waiting, playing, finished
       deck: this.createDeck(),
       currentPlayerIndex: 0,
-      dealer: { cards: [], score: 0 },
+      dealer: gameType === 'blackjack' ? { cards: [], score: 0 } : null,
       createdAt: Date.now()
     };
     
@@ -185,9 +186,11 @@ export class GameManager {
       player.score = this.calculateScore(player.cards);
     }
     
-    // Дилеру 2 карты (одна скрыта)
-    game.dealer.cards = [game.deck.pop(), game.deck.pop()];
-    game.dealer.score = this.calculateScore([game.dealer.cards[0]]);
+    // Дилеру 2 карты только в режиме blackjack
+    if (game.gameType === 'blackjack') {
+      game.dealer.cards = [game.deck.pop(), game.deck.pop()];
+      game.dealer.score = this.calculateScore([game.dealer.cards[0]]);
+    }
     
     // Устанавливаем время начала хода для первого игрока
     game.turnStartTime = Date.now();
@@ -280,8 +283,12 @@ export class GameManager {
       game.currentPlayerIndex++;
     }
     
-    // Все игроки завершили - ход дилера
-    await this.dealerTurn(game);
+    // Все игроки завершили
+    if (game.gameType === 'blackjack') {
+      // В блекджеке - ход дилера
+      await this.dealerTurn(game);
+    }
+    // В обоих режимах определяем победителей
     await this.determineWinners(game);
     game.status = 'finished';
     
@@ -298,23 +305,56 @@ export class GameManager {
   }
 
   async determineWinners(game) {
-    const dealerScore = game.dealer.score;
-    const dealerBusted = dealerScore > 21;
-    
-    for (const player of game.players) {
-      if (player.status === 'busted') {
-        player.result = 'lose';
-      } else if (dealerBusted) {
-        player.result = 'win';
-      } else if (player.score > dealerScore) {
-        player.result = 'win';
-      } else if (player.score === dealerScore) {
-        player.result = 'push';
-      } else {
-        player.result = 'lose';
+    if (game.gameType === 'blackjack') {
+      // Режим блекджек - игроки против дилера
+      const dealerScore = game.dealer.score;
+      const dealerBusted = dealerScore > 21;
+      
+      for (const player of game.players) {
+        if (player.status === 'busted') {
+          player.result = 'lose';
+        } else if (dealerBusted) {
+          player.result = 'win';
+        } else if (player.score > dealerScore) {
+          player.result = 'win';
+        } else if (player.score === dealerScore) {
+          player.result = 'push';
+        } else {
+          player.result = 'lose';
+        }
       }
+    } else {
+      // Режим PvP - игроки друг против друга
+      // Находим максимальный счет среди не перебравших игроков
+      let maxScore = 0;
+      const activePlayers = game.players.filter(p => p.status !== 'busted');
+      
+      for (const player of activePlayers) {
+        if (player.score > maxScore) {
+          maxScore = player.score;
+        }
+      }
+      
+      // Определяем победителей
+      for (const player of game.players) {
+        if (player.status === 'busted') {
+          player.result = 'lose';
+        } else if (player.score === maxScore) {
+          // Проверяем сколько игроков с таким же счетом
+          const winnersCount = activePlayers.filter(p => p.score === maxScore).length;
+          if (winnersCount === 1) {
+            player.result = 'win';
+          } else {
+            player.result = 'push'; // Ничья между несколькими игроками
+          }
+        } else {
+          player.result = 'lose';
+        }
+      }
+    }
 
-      // Сохраняем результат в MongoDB и обновляем баланс
+    // Сохраняем результат в MongoDB и обновляем баланс
+    for (const player of game.players) {
       if (isDatabaseConnected()) {
         try {
           const dbPlayer = await Player.findOne({ userId: player.userId });

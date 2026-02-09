@@ -194,7 +194,8 @@ io.on('connection', (socket) => {
 // REST API
 app.post('/api/create-game', async (req, res) => {
   try {
-    const gameId = await gameManager.createGame();
+    const { gameType } = req.body; // 'blackjack' или 'pvp'
+    const gameId = await gameManager.createGame(gameType);
     res.json({ success: true, gameId });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
