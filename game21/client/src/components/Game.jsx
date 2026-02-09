@@ -72,39 +72,52 @@ function Game({ gameState, socket, user, gameId }) {
       {/* Другие игроки */}
       {otherPlayers.length > 0 && (
         <div className="other-players">
-          {otherPlayers.map((player) => (
-            <div key={player.userId} className="player-mini">
-              <div className="player-header">
-                <span className="player-name">{player.username}</span>
-                <span className="score">{player.score}</span>
+          {otherPlayers.map((player) => {
+            const resultIcon = isFinished && player.result 
+              ? (player.result === 'win' ? '🏆' : player.result === 'push' ? '🤝' : '❌')
+              : '';
+            
+            return (
+              <div 
+                key={player.userId} 
+                className={`player-mini ${isFinished && player.result ? `result-${player.result}` : ''}`}
+              >
+                <div className="player-header">
+                  <span className="player-name">
+                    {resultIcon && <span className="result-icon">{resultIcon}</span>}
+                    {player.username}
+                  </span>
+                  <span className="score">{player.score}</span>
+                </div>
+                {player.bet && (
+                  <div className="player-bet">Ставка: {player.bet}₽</div>
+                )}
+                <div className="cards-mini">
+                  {player.cards.map((card, idx) => (
+                    <Card key={idx} card={card} mini />
+                  ))}
+                </div>
+                {player.status === 'busted' && <span className="status-badge bust">Перебор</span>}
+                {player.status === 'stand' && <span className="status-badge stand">Пас</span>}
               </div>
-              {player.bet && (
-                <div className="player-bet">Ставка: {player.bet}₽</div>
-              )}
-              <div className="cards-mini">
-                {player.cards.map((card, idx) => (
-                  <Card key={idx} card={card} mini />
-                ))}
-              </div>
-              {player.status === 'busted' && <span className="status-badge bust">Перебор</span>}
-              {player.status === 'stand' && <span className="status-badge stand">Пас</span>}
-              {isFinished && player.result && (
-                <span className={`result-badge ${player.result}`}>
-                  {player.result === 'win' ? '🏆 Победа' : 
-                   player.result === 'push' ? '🤝 Ничья' : '❌ Проигрыш'}
-                </span>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
       {/* Текущий игрок */}
       {myPlayer && (
-        <div className="my-player">
+        <div className={`my-player ${isFinished && myPlayer.result ? `result-${myPlayer.result}` : ''}`}>
           <div className="player-info">
             <div>
-              <div className="player-name">Вы: {myPlayer.username}</div>
+              <div className="player-name">
+                {isFinished && myPlayer.result && (
+                  <span className="result-icon">
+                    {myPlayer.result === 'win' ? '🎉' : myPlayer.result === 'push' ? '🤝' : '😔'}
+                  </span>
+                )}
+                Вы: {myPlayer.username}
+              </div>
               {myPlayer.bet && (
                 <div className="my-bet">Ставка: {myPlayer.bet}₽</div>
               )}
@@ -123,9 +136,9 @@ function Game({ gameState, socket, user, gameId }) {
             <div className="status-message stand">✋ Вы спасовали</div>
           )}
           {isFinished && myPlayer.result && (
-            <div className={`result-message ${myPlayer.result}`}>
-              {myPlayer.result === 'win' ? `🎉 Вы выиграли +${myPlayer.bet}₽!` : 
-               myPlayer.result === 'push' ? '🤝 Ничья' : `😔 Вы проиграли -${myPlayer.bet}₽`}
+            <div className="result-compact">
+              {myPlayer.result === 'win' ? `+${myPlayer.bet}₽` : 
+               myPlayer.result === 'push' ? 'Возврат ставки' : `-${myPlayer.bet}₽`}
             </div>
           )}
         </div>
