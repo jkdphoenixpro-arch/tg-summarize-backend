@@ -2,10 +2,11 @@ import Player from './models/Player.js';
 import { isDatabaseConnected } from './database.js';
 
 export class GameManager {
-  constructor(redis, io = null, startGameInterval = null) {
+  constructor(redis, io = null, startGameInterval = null, botEvents = null) {
     this.redis = redis;
     this.io = io; // Socket.io instance для отправки событий
     this.startGameInterval = startGameInterval; // Функция для запуска интервала
+    this.botEvents = botEvents; // EventEmitter для связи с ботом
     this.MIN_BET = 20;
     this.MAX_BET = 300;
     this.TURN_TIMEOUT = 30000; // 30 секунд на ход
@@ -16,11 +17,12 @@ export class GameManager {
     this.autoStartTimers = new Map(); // Хранилище таймеров автостарта
   }
 
-  async createGame(gameType = 'blackjack') {
+  async createGame(gameType = 'blackjack', chatId = null) {
     const gameId = `game_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const game = {
       id: gameId,
       gameType: gameType, // 'blackjack' или 'pvp'
+      chatId: chatId, // ID чата где создана игра
       players: [],
       status: 'waiting', // waiting, playing, finished
       deck: this.createDeck(),
@@ -435,6 +437,36 @@ export class GameManager {
     // ВАЖНО: Очищаем таймер после завершения игры
     this.clearTurnTimer(game.id);
     console.log(`🧹 Игра ${game.id} завершена, ресурсы очищены`);
+    
+    // Отправляем результаты в чат через 2 секунды
+    if (this.botEvents && game.chatId) {
+      setTimeout(() => {
+        const winners = game.players.filter(p => p.result === 'win');
+        const losers = game.players.filter(p => p.result === 'lose');
+        const totalPot = game.players.reduce((sum, p) => sum + p.bet, 0);
+        
+        this.botEvents.emit('game_finished', {
+          chatId: game.chatId,
+          gameType: game.gameType,
+          results: {
+            winners: winners.map(p => ({
+              username: p.username,
+              score: p.score,
+              bet: p.bet,
+              winAmount: p.bet * 2
+            })),
+            losers: losers.map(p => ({
+              username: p.username,
+              score: p.score,
+              bet: p.bet
+            })),
+            totalPot: totalPot
+          }
+        });
+        
+        console.log(`📢 Событие game_finished отправлено для чата ${game.chatId}`);
+      }, 2000);
+    }
   }
 
   // Методы управления таймерами

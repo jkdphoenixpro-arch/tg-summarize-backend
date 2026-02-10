@@ -5,6 +5,7 @@ import { StringSession } from 'telegram/sessions/index.js';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import { encoding_for_model } from 'tiktoken';
+import { botEvents } from './botEvents.js';
 
 dotenv.config();
 
@@ -834,7 +835,10 @@ bot.command('blackjack', async (ctx) => {
         const response = await fetch(`${process.env.GAME_SERVER_URL || 'http://localhost:3001'}/api/create-game`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ gameType: 'blackjack' })
+            body: JSON.stringify({ 
+                gameType: 'blackjack',
+                chatId: ctx.chat.id.toString()  // Добавляем chatId
+            })
         });
 
         const data = await response.json();
@@ -889,7 +893,10 @@ bot.command('game21', async (ctx) => {
         const response = await fetch(`${process.env.GAME_SERVER_URL || 'http://localhost:3001'}/api/create-game`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ gameType: 'pvp' })
+            body: JSON.stringify({ 
+                gameType: 'pvp',
+                chatId: ctx.chat.id.toString()  // Добавляем chatId
+            })
         });
 
         const data = await response.json();
@@ -1199,6 +1206,77 @@ bot.on('text', async (ctx) => {
     }
 });
 
+// ========================================
+// ОБРАБОТЧИК СОБЫТИЙ ОТ ИГРОВОГО СЕРВЕРА
+// ========================================
+
+// Функция форматирования результатов игры
+function formatGameResults(gameType, results) {
+    const { winners, losers, totalPot } = results;
+    
+    let message = `🎮 <b>Игра завершена!</b>\n\n`;
+    
+    // Тип игры
+    if (gameType === 'blackjack') {
+        message += `🃏 <b>Режим:</b> Блекджек\n\n`;
+    } else {
+        message += `🎴 <b>Режим:</b> 21 Очко (PvP)\n\n`;
+    }
+    
+    // Победители
+    if (winners && winners.length > 0) {
+        message += `🏆 <b>Победители:</b>\n`;
+        winners.forEach(w => {
+            const winAmount = w.winAmount || w.bet * 2;
+            message += `  • ${w.username}: <b>+${winAmount}₽</b> (${w.score} очков)\n`;
+        });
+        message += `\n`;
+    }
+    
+    // Проигравшие
+    if (losers && losers.length > 0) {
+        message += `😔 <b>Проигравшие:</b>\n`;
+        losers.forEach(l => {
+            message += `  • ${l.username}: <b>-${l.bet}₽</b> (${l.score} очков)\n`;
+        });
+        message += `\n`;
+    }
+    
+    // Банк
+    if (totalPot) {
+        message += `💰 <b>Банк:</b> ${totalPot}₽\n`;
+    }
+    
+    message += `\n🎲 Сыграть еще? /game21 или /blackjack`;
+    
+    return message;
+}
+
+// Слушаем событие завершения игры
+botEvents.on('game_finished', async (data) => {
+    try {
+        const { chatId, gameType, results } = data;
+        
+        console.log(`📢 Отправка результатов игры в чат ${chatId}`);
+        
+        const message = formatGameResults(gameType, results);
+        
+        await bot.telegram.sendMessage(chatId, message, {
+            parse_mode: 'HTML'
+        });
+        
+        console.log(`✅ Результаты отправлены в чат ${chatId}`);
+    } catch (error) {
+        console.error('❌ Ошибка отправки результатов игры:', error);
+    }
+});
+
+console.log('✅ Обработчик событий игры подключен');
+
+// ========================================
+// ЗАПУСК БОТА
+// ========================================
+
 bot.launch();
 
 console.log('🤖 Объединенный бот запущен!');
@@ -1206,3 +1284,6 @@ console.log(`📊 Целевой чат для анализа: ${targetChatId}`)
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+// Экспортируем bot для использования в других модулях
+export { bot };

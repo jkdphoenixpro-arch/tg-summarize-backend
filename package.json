@@ -5,6 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
+    "postinstall": "cd game21/server && npm install",
     "start": "node start-combined.js",
     "dev": "node --watch index.js",
     "collector": "node collector-bot.js",

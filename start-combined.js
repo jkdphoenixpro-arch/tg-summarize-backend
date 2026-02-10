@@ -1,7 +1,20 @@
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
+import { existsSync } from 'fs';
 
 console.log('🚀 Запуск Combined Bot + Game Backend...');
 console.log('');
+
+// Проверяем и устанавливаем зависимости для game21/server
+if (!existsSync('game21/server/node_modules')) {
+  console.log('📦 Установка зависимостей для game21/server...');
+  try {
+    execSync('cd game21/server && npm install', { stdio: 'inherit' });
+    console.log('✅ Зависимости установлены');
+  } catch (error) {
+    console.error('❌ Ошибка установки зависимостей:', error.message);
+    process.exit(1);
+  }
+}
 
 // Запускаем Game Backend
 console.log('1️⃣ Запуск Game Backend (порт 3001)...');

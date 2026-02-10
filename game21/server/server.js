@@ -8,14 +8,24 @@ import { GameManager } from './gameManager.js';
 import InMemoryStorage from './inMemoryStorage.js';
 import { connectDatabase } from './database.js';
 import Player from './models/Player.js';
+import { botEvents } from '../../botEvents.js';
 
 dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
+
+// Разрешенные origins для CORS
+const allowedOrigins = [
+  process.env.WEBAPP_URL,
+  'http://localhost:5173',
+  'https://tg-summarize-bot.pages.dev',
+  /\.pages\.dev$/  // Все поддомены pages.dev
+].filter(Boolean);
+
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.WEBAPP_URL || 'http://localhost:5173',
+    origin: allowedOrigins,
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -23,7 +33,7 @@ const io = new Server(httpServer, {
 
 // CORS для Express
 app.use(cors({
-  origin: process.env.WEBAPP_URL || 'http://localhost:5173',
+  origin: allowedOrigins,
   credentials: true
 }));
 app.use(express.json());
@@ -61,7 +71,7 @@ if (process.env.USE_MEMORY_STORAGE === 'true') {
   }
 }
 
-const gameManager = new GameManager(redis, io, startGameInterval);
+const gameManager = new GameManager(redis, io, startGameInterval, botEvents);
 
 // Хранилище интервалов для каждой игры (для очистки)
 const gameIntervals = new Map();
@@ -253,8 +263,8 @@ io.on('connection', (socket) => {
 // REST API
 app.post('/api/create-game', async (req, res) => {
   try {
-    const { gameType } = req.body; // 'blackjack' или 'pvp'
-    const gameId = await gameManager.createGame(gameType);
+    const { gameType, chatId } = req.body; // 'blackjack' или 'pvp' + chatId
+    const gameId = await gameManager.createGame(gameType, chatId);
     res.json({ success: true, gameId });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
