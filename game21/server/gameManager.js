@@ -439,13 +439,13 @@ export class GameManager {
     console.log(`🧹 Игра ${game.id} завершена, ресурсы очищены`);
     
     // Отправляем результаты в чат через 2 секунды
-    if (this.botEvents && game.chatId) {
-      setTimeout(() => {
+    if (game.chatId) {
+      setTimeout(async () => {
         const winners = game.players.filter(p => p.result === 'win');
         const losers = game.players.filter(p => p.result === 'lose');
         const totalPot = game.players.reduce((sum, p) => sum + p.bet, 0);
         
-        this.botEvents.emit('game_finished', {
+        const payload = {
           chatId: game.chatId,
           gameType: game.gameType,
           results: {
@@ -462,9 +462,31 @@ export class GameManager {
             })),
             totalPot: totalPot
           }
-        });
+        };
         
-        console.log(`📢 Событие game_finished отправлено для чата ${game.chatId}`);
+        // Отправляем HTTP запрос к боту
+        try {
+          const botApiUrl = process.env.BOT_API_URL || 'http://localhost:3002';
+          const response = await fetch(`${botApiUrl}/api/game-finished`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          
+          if (response.ok) {
+            console.log(`✅ HTTP: Результаты отправлены боту для чата ${game.chatId}`);
+          } else {
+            console.error(`❌ HTTP: Ошибка отправки результатов: ${response.status}`);
+          }
+        } catch (error) {
+          console.error(`❌ HTTP: Не удалось отправить результаты боту:`, error.message);
+        }
+        
+        // Также отправляем через EventEmitter (для локальной разработки)
+        if (this.botEvents) {
+          this.botEvents.emit('game_finished', payload);
+          console.log(`📢 EventEmitter: Событие game_finished отправлено для чата ${game.chatId}`);
+        }
       }, 2000);
     }
   }

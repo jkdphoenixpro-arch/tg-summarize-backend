@@ -6,11 +6,16 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import { encoding_for_model } from 'tiktoken';
 import { botEvents } from './botEvents.js';
+import express from 'express';
 
 dotenv.config();
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+// Express API для получения уведомлений от игрового сервера
+const app = express();
+app.use(express.json());
 
 // Инициализируем tiktoken для подсчета токенов
 const encoder = encoding_for_model('gpt-4');
@@ -835,7 +840,7 @@ bot.command('blackjack', async (ctx) => {
         const response = await fetch(`${process.env.GAME_SERVER_URL || 'http://localhost:3001'}/api/create-game`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 gameType: 'blackjack',
                 chatId: ctx.chat.id.toString()  // Добавляем chatId
             })
@@ -893,7 +898,7 @@ bot.command('game21', async (ctx) => {
         const response = await fetch(`${process.env.GAME_SERVER_URL || 'http://localhost:3001'}/api/create-game`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 gameType: 'pvp',
                 chatId: ctx.chat.id.toString()  // Добавляем chatId
             })
@@ -1207,22 +1212,22 @@ bot.on('text', async (ctx) => {
 });
 
 // ========================================
-// ОБРАБОТЧИК СОБЫТИЙ ОТ ИГРОВОГО СЕРВЕРА
+// HTTP API ДЛЯ УВЕДОМЛЕНИЙ ОТ ИГРОВОГО СЕРВЕРА
 // ========================================
 
 // Функция форматирования результатов игры
 function formatGameResults(gameType, results) {
     const { winners, losers, totalPot } = results;
-    
+
     let message = `🎮 <b>Игра завершена!</b>\n\n`;
-    
+
     // Тип игры
     if (gameType === 'blackjack') {
         message += `🃏 <b>Режим:</b> Блекджек\n\n`;
     } else {
         message += `🎴 <b>Режим:</b> 21 Очко (PvP)\n\n`;
     }
-    
+
     // Победители
     if (winners && winners.length > 0) {
         message += `🏆 <b>Победители:</b>\n`;
@@ -1232,7 +1237,7 @@ function formatGameResults(gameType, results) {
         });
         message += `\n`;
     }
-    
+
     // Проигравшие
     if (losers && losers.length > 0) {
         message += `😔 <b>Проигравшие:</b>\n`;
@@ -1241,37 +1246,64 @@ function formatGameResults(gameType, results) {
         });
         message += `\n`;
     }
-    
+
     // Банк
     if (totalPot) {
         message += `💰 <b>Банк:</b> ${totalPot}₽\n`;
     }
-    
+
     message += `\n🎲 Сыграть еще? /game21 или /blackjack`;
-    
+
     return message;
 }
 
-// Слушаем событие завершения игры
-botEvents.on('game_finished', async (data) => {
+// HTTP API endpoint для получения уведомлений от игрового сервера
+app.post('/api/game-finished', async (req, res) => {
     try {
-        const { chatId, gameType, results } = data;
-        
-        console.log(`📢 Отправка результатов игры в чат ${chatId}`);
-        
+        const { chatId, gameType, results } = req.body;
+
+        console.log(`📢 HTTP: Получено уведомление о завершении игры для чата ${chatId}`);
+
         const message = formatGameResults(gameType, results);
-        
+
         await bot.telegram.sendMessage(chatId, message, {
             parse_mode: 'HTML'
         });
-        
-        console.log(`✅ Результаты отправлены в чат ${chatId}`);
+
+        console.log(`✅ HTTP: Результаты отправлены в чат ${chatId}`);
+        res.json({ success: true });
     } catch (error) {
-        console.error('❌ Ошибка отправки результатов игры:', error);
+        console.error('❌ HTTP: Ошибка отправки результатов игры:', error);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
-console.log('✅ Обработчик событий игры подключен');
+// Запускаем Express сервер на порту 3002
+const BOT_API_PORT = process.env.BOT_API_PORT || 3002;
+app.listen(BOT_API_PORT, () => {
+    console.log(`✅ Bot API запущен на порту ${BOT_API_PORT}`);
+});
+
+// Слушаем событие завершения игры (оставляем для обратной совместимости)
+botEvents.on('game_finished', async (data) => {
+    try {
+        const { chatId, gameType, results } = data;
+
+        console.log(`📢 EventEmitter: Отправка результатов игры в чат ${chatId}`);
+
+        const message = formatGameResults(gameType, results);
+
+        await bot.telegram.sendMessage(chatId, message, {
+            parse_mode: 'HTML'
+        });
+
+        console.log(`✅ EventEmitter: Результаты отправлены в чат ${chatId}`);
+    } catch (error) {
+        console.error('❌ EventEmitter: Ошибка отправки результатов игры:', error);
+    }
+});
+
+console.log('✅ Обработчик событий игры подключен (EventEmitter + HTTP API)');
 
 // ========================================
 // ЗАПУСК БОТА

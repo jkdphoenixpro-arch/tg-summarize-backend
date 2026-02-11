@@ -1,0 +1,21 @@
+{
+  "name": "summarizetest-bot",
+  "version": "1.0.0",
+  "description": "Тестовый бот для команды summarizetest",
+  "type": "module",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "node --watch bot.js"
+  },
+  "keywords": ["telegram", "bot", "summarize"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "telegraf": "^4.16.3",
+    "groq-sdk": "^0.8.0",
+    "telegram": "^2.25.11",
+    "dotenv": "^16.4.7",
+    "tiktoken": "^1.0.17"
+  }
+}
