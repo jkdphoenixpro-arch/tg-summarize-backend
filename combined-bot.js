@@ -1287,14 +1287,17 @@ bot.on('poll_answer', async (ctx) => {
 });
 
 // Обработка текстовых сообщений
-bot.on('text', async (ctx) => {
+bot.on('text', async (ctx, next) => {
     const chatId = ctx.chat.id;
     const chatType = ctx.chat.type;
 
     // Если это группа - собираем сообщения
     if (chatType !== 'private') {
-        // Пропускаем команды
-        if (ctx.message.text.startsWith('/')) return;
+        // Пропускаем команды - передаём управление дальше
+        if (ctx.message.text.startsWith('/')) {
+            console.log('⏭️ Команда обнаружена, передаю обработчикам команд');
+            return next();
+        }
 
         if (!chatMessages.has(chatId)) {
             chatMessages.set(chatId, []);
