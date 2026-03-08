@@ -47,13 +47,20 @@ function formatGameInfo(game) {
 
 // Команда /randombunker - создание новой игры
 export async function handleRandomBunker(ctx) {
+    console.log('🎮 Команда /randombunker получена');
+    console.log('📍 Тип чата:', ctx.chat.type);
+    console.log('👤 От пользователя:', ctx.from.username || ctx.from.first_name);
+    
     // Работает только в группах
     if (ctx.chat.type === 'private') {
         return ctx.reply('❌ Эта команда работает только в группах');
     }
     
     const chatId = ctx.chat.id;
+    console.log('🆔 ID чата:', chatId);
+    
     const game = await createGame(chatId);
+    console.log('✅ Игра создана:', game.gameId);
     
     const keyboard = Markup.inlineKeyboard([
         [Markup.button.callback('✅ Присоединиться', `bunker_join:${game.gameId}`)],
