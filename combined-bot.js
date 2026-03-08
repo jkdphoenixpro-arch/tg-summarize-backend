@@ -25,6 +25,13 @@ console.log('✅ Bunker commands импортированы:', {
     handleLeave: typeof handleLeave
 });
 
+// Тест: попробуем вызвать функцию
+if (typeof handleRandomBunker !== 'function') {
+    console.error('❌ КРИТИЧЕСКАЯ ОШИБКА: handleRandomBunker не является функцией!');
+} else {
+    console.log('✅ handleRandomBunker - валидная функция');
+}
+
 dotenv.config();
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -1445,7 +1452,16 @@ console.log('✅ Обработчик событий игры подключен
 
 // Команды для игры в бункер
 console.log('🔧 Регистрирую команду randombunker...');
-bot.command('randombunker', handleRandomBunker);
+bot.command('randombunker', async (ctx) => {
+    console.log('🎯 КОМАНДА RANDOMBUNKER ВЫЗВАНА НАПРЯМУЮ!');
+    try {
+        await ctx.reply('✅ Команда работает! Сейчас создам игру...');
+        await handleRandomBunker(ctx);
+    } catch (error) {
+        console.error('💥 ОШИБКА:', error);
+        await ctx.reply('❌ Ошибка: ' + error.message);
+    }
+});
 console.log('✅ Команда randombunker зарегистрирована');
 bot.command('myrole', handleMyRole);
 bot.command('role', handleRole);
