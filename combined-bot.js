@@ -30,6 +30,21 @@ dotenv.config();
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
+// ========================================
+// ОТЛАДКА: Логирование всех команд (ДОЛЖНО БЫТЬ ПЕРВЫМ!)
+// ========================================
+
+bot.use(async (ctx, next) => {
+    if (ctx.message && ctx.message.text && ctx.message.text.startsWith('/')) {
+        console.log('📨 Получена команда:', ctx.message.text);
+        console.log('👤 От:', ctx.from.username || ctx.from.first_name);
+        console.log('💬 Чат:', ctx.chat.type, ctx.chat.id);
+    }
+    return next();
+});
+
+console.log('✅ Middleware для логирования команд установлен (в начале)');
+
 // Express API для получения уведомлений от игрового сервера
 const app = express();
 app.use(express.json());
@@ -1423,21 +1438,6 @@ botEvents.on('game_finished', async (data) => {
 });
 
 console.log('✅ Обработчик событий игры подключен (EventEmitter + HTTP API)');
-
-// ========================================
-// ОТЛАДКА: Логирование всех команд
-// ========================================
-
-bot.use(async (ctx, next) => {
-    if (ctx.message && ctx.message.text && ctx.message.text.startsWith('/')) {
-        console.log('📨 Получена команда:', ctx.message.text);
-        console.log('👤 От:', ctx.from.username || ctx.from.first_name);
-        console.log('💬 Чат:', ctx.chat.type, ctx.chat.id);
-    }
-    return next();
-});
-
-console.log('✅ Middleware для логирования команд установлен');
 
 // ========================================
 // ИГРА "БУНКЕР"
