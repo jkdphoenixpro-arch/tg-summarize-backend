@@ -7,6 +7,17 @@ import fs from 'fs';
 import { encoding_for_model } from 'tiktoken';
 import { botEvents } from './botEvents.js';
 import express from 'express';
+import {
+    handleRandomBunker,
+    handleJoin,
+    handleLeave,
+    handleMyRole,
+    handleRole,
+    handleVote,
+    handleVoteCallback,
+    handleEndVote,
+    handleStopBunker
+} from './bunker-game/bunkerCommands.js';
 
 dotenv.config();
 
@@ -58,6 +69,64 @@ function selectMessagesWithinTokenLimit(messages, maxTokens = MAX_CONTEXT_TOKENS
 
     console.log(`✅ Выбрано ${selectedMessages.length} сообщений, токенов: ${totalTokens}/${maxTokens}`);
     return selectedMessages;
+}
+
+// Функция для разбивки длинного текста на части (chunks)
+function splitMessage(text, maxLength = 4000) {
+    if (text.length <= maxLength) {
+        return [text];
+    }
+
+    const chunks = [];
+    let currentChunk = '';
+
+    // Разбиваем по параграфам (двойной перенос строки)
+    const paragraphs = text.split('\n\n');
+
+    for (const paragraph of paragraphs) {
+        // Если добавление параграфа превысит лимит
+        if ((currentChunk + '\n\n' + paragraph).length > maxLength) {
+            // Сохраняем текущий chunk если он не пустой
+            if (currentChunk) {
+                chunks.push(currentChunk.trim());
+                currentChunk = '';
+            }
+
+            // Если сам параграф слишком длинный - разбиваем по предложениям
+            if (paragraph.length > maxLength) {
+                const sentences = paragraph.split('. ');
+                for (const sentence of sentences) {
+                    if ((currentChunk + '. ' + sentence).length > maxLength) {
+                        if (currentChunk) {
+                            chunks.push(currentChunk.trim());
+                            currentChunk = '';
+                        }
+                        // Если даже предложение слишком длинное - режем по символам
+                        if (sentence.length > maxLength) {
+                            for (let i = 0; i < sentence.length; i += maxLength) {
+                                chunks.push(sentence.substring(i, i + maxLength));
+                            }
+                        } else {
+                            currentChunk = sentence;
+                        }
+                    } else {
+                        currentChunk += (currentChunk ? '. ' : '') + sentence;
+                    }
+                }
+            } else {
+                currentChunk = paragraph;
+            }
+        } else {
+            currentChunk += (currentChunk ? '\n\n' : '') + paragraph;
+        }
+    }
+
+    // Добавляем последний chunk
+    if (currentChunk) {
+        chunks.push(currentChunk.trim());
+    }
+
+    return chunks;
 }
 
 // Userbot клиент
@@ -112,7 +181,7 @@ function createGroqRequest(chatContext) {
         messages: [
             {
                 role: 'system',
-                content: 'Делай большое ежедневное саммари чата. Выдавай ТОЛЬКО развёрнутое саммари в точной структуре: 📅 Ежедневное саммари чата → каждый пункт начинается с эмодзи + короткий понятный заголовок темы → минимум 6–10 предложений на каждую тему. Подробно описывай, о чём говорили участники, какие были аргументы, где возникали разногласия, какие идеи поддержали, а какие вызвали сомнения. Упоминай участников по именам, если это уместно. Если в обсуждении были ошибки или слабые места в логике — объясняй их и разбирай возможные последствия. Если кто-то предложил сильную мысль или решение — подчёркивай это и показывай, почему это было важно для разговора. Добавляй эмоции и динамику беседы, но без ролевых образов. Используй эмодзи для атмосферы. В конце обязательно делай большой общий вывод на 4–6 предложений: главные результаты обсуждений, к чему пришёл чат, что осталось открытым и какие вопросы могут вернуться позже. Ничего лишнего в reasoning — только этот большой готовый текст саммари. Теперь читай весь чат и выдавай только такое большое саммари.'
+                content: 'Делай большое ежедневное аналитическое саммари чата. Это не пересказ. Это разбор и интерпретация происходящего. Строго соблюдай структуру: 📅 Ежедневное саммари чата → каждый пункт начинается с эмодзи + короткий понятный заголовок темы → минимум 6–10 предложений на каждую тему. Для каждой темы обязательно: — подробно объясняй, почему разговор пошёл именно так — какие причины привели участников к их мнениям — какие аргументы были сильными, а какие слабыми — где логика могла быть неполной или ошибочной — к каким последствиям могут привести высказанные идеи — какие скрытые предположения стояли за словами участников — как менялась позиция людей по ходу обсуждения — какие моменты усиливали конфликт, а какие помогали прийти к согласию. Не перечисляй события — анализируй их. Если кто-то высказал особенно сильную мысль или предложил рабочее решение — объясни, почему это было важно и как это повлияло на дальнейший разговор. Если были ошибки мышления, когнитивные искажения или поспешные выводы — разбирай их подробно. Добавляй эмоции и динамику беседы, но без ролевых образов. Используй эмодзи для атмосферы. Раскрывай детали максимально широко. Предпочитай глубину, а не краткость. Расширяй объяснения везде, где это возможно. В конце обязательно сделай большой общий вывод на 4–6 предложений: главные результаты обсуждений, к каким пониманиям пришли участники, что осталось нерешённым, какие темы почти гарантированно всплывут снова и почему. Ничего лишнего в ответе — только готовый текст саммари(на русском). Перед написанием продумай причинно-следственные связи между событиями. Сделай так что бы текст ответа не превышал 4000 символов, сокращая второстепенные детали, но сохраняя логику и анализ. Используй много эмодзи для заголовков, эмоций и атмосферы, делая текст ярким и живым, но не переборщи с повторением одинаковых.'
             },
             {
                 role: 'user',
@@ -131,39 +200,23 @@ function extractFinalText(message, options = {}) {
     const { logReasoning = false } = options;
 
     const reasoning = message?.reasoning || null;
-    let finalAnswer = message?.content || 'Нет ответа';
+    let content = message?.content || 'Нет ответа';
 
-    // Пытаемся извлечь thinking из content если есть теги <thinking>
-    let thinkingFromContent = null;
-    const thinkingMatch = finalAnswer.match(/<thinking>([\s\S]*?)<\/thinking>/i);
-    if (thinkingMatch) {
-        thinkingFromContent = thinkingMatch[1].trim();
+    // Если нужно вывести reasoning в консоль (для отладки)
+    if (logReasoning && reasoning) {
+        console.log('\n=== 🧠 REASONING ОТ НЕЙРОНКИ (для отладки) ===');
+        console.log(reasoning);
+        console.log('==============================================\n');
     }
 
-    // Используем reasoning из API или thinking из content
-    const actualReasoning = reasoning || thinkingFromContent;
+    // Логируем что используем
+    console.log('📝 Используется content из ответа API');
 
-    // Логируем источник ответа
-    if (reasoning) {
-        console.log('📝 Используется reasoning из API');
-    } else if (thinkingFromContent) {
-        console.log('📝 Используется thinking из content');
+    // Возвращаем основной ответ (content)
+    if (content && content !== 'Нет ответа') {
+        return content;
     } else {
-        console.log('⚠️ Нет reasoning/thinking в ответе');
-    }
-
-    // Если нужно вывести reasoning в консоль
-    if (logReasoning && actualReasoning) {
-        console.log('\n=== 🧠 REASONING ОТ НЕЙРОНКИ ===');
-        console.log(actualReasoning);
-        console.log('================================\n');
-    }
-
-    // Возвращаем ТОЛЬКО reasoning, если его нет - возвращаем сообщение об ошибке
-    if (actualReasoning) {
-        return actualReasoning;
-    } else {
-        return '❌ Нейронка не вернула reasoning. Попробуй еще раз.';
+        return '❌ Нейронка не вернула ответ. Попробуй еще раз.';
     }
 }
 
@@ -216,7 +269,7 @@ bot.command('status', async (ctx) => {
     if (chatMessages.size > 0) {
         try {
             let allMessages = [];
-            const saveLimit = parseInt(process.env.MESSAGE_LIMIT || '100');
+            const saveLimit = parseInt(process.env.MESSAGE_LIMIT || '250');
 
             for (const [chatId, messages] of chatMessages.entries()) {
                 // Берем последние сообщения из каждого чата согласно MESSAGE_LIMIT
@@ -302,7 +355,27 @@ bot.command('analyze', async (ctx) => {
 
         console.log('✅ Анализ готов');
 
-        await ctx.reply(finalText);
+        // Разбиваем текст на части если он слишком длинный
+        const chunks = splitMessage(finalText, 4000);
+
+        console.log(`📤 Отправка ${chunks.length} сообщений...`);
+
+        // Отправляем все части
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+
+            // Добавляем индикатор части если сообщений больше одного
+            const partIndicator = chunks.length > 1 ? `\n\n[Часть ${i + 1}/${chunks.length}]` : '';
+
+            await ctx.reply(chunk + partIndicator);
+
+            // Небольшая задержка между сообщениями чтобы не словить rate limit
+            if (i < chunks.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
+
+        console.log('✅ Все части отправлены');
 
     } catch (error) {
         console.error('❌ Ошибка при анализе:', error);
@@ -355,7 +428,7 @@ bot.command('save', async (ctx) => {
         await ctx.reply('📥 Собираю историю сообщений...');
         console.log('📥 Начинаю сбор сообщений через userbot...');
 
-        const limit = parseInt(process.env.MESSAGE_LIMIT || '150');
+        const limit = parseInt(process.env.MESSAGE_LIMIT || '250');
         const messages = [];
 
         // Собираем сообщения через userbot
@@ -448,7 +521,7 @@ bot.command('summarize', async (ctx) => {
             }
         }
 
-        const limit = parseInt(process.env.MESSAGE_LIMIT || '150');
+        const limit = parseInt(process.env.MESSAGE_LIMIT || '250');
         const messages = [];
 
         // Собираем сообщения через userbot
@@ -516,8 +589,27 @@ bot.command('summarize', async (ctx) => {
 
         console.log('✅ Суммаризация готова');
 
-        // Отправляем в группу
-        await ctx.reply(finalText);
+        // Разбиваем текст на части если он слишком длинный
+        const chunks = splitMessage(finalText, 4000);
+
+        console.log(`📤 Отправка ${chunks.length} сообщений в группу...`);
+
+        // Отправляем все части
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+
+            // Добавляем индикатор части если сообщений больше одного
+            const partIndicator = chunks.length > 1 ? `\n\n[Часть ${i + 1}/${chunks.length}]` : '';
+
+            await ctx.reply(chunk + partIndicator);
+
+            // Небольшая задержка между сообщениями чтобы не словить rate limit
+            if (i < chunks.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
+
+        console.log('✅ Все части отправлены в группу');
 
     } catch (error) {
         console.error('❌ Ошибка при суммаризации:', error);
@@ -550,7 +642,7 @@ async function createPollFromChat(ctx, chatId) {
             }
         }
 
-        const limit = parseInt(process.env.MESSAGE_LIMIT || '150');
+        const limit = parseInt(process.env.MESSAGE_LIMIT || '250');
         const messages = [];
 
         // Собираем сообщения через userbot
@@ -1041,7 +1133,7 @@ bot.command('summarizetest', async (ctx) => {
             }
         }
 
-        const limit = parseInt(process.env.MESSAGE_LIMIT || '150');
+        const limit = parseInt(process.env.MESSAGE_LIMIT || '250');
         const messages = [];
 
         // Собираем сообщения через userbot
@@ -1109,8 +1201,29 @@ bot.command('summarizetest', async (ctx) => {
 
         console.log('✅ Суммаризация готова (тест)');
 
-        // Отправляем в личку владельцу
-        await ctx.reply(`📊 Результат анализа чата ${chatId}:\n\n${finalText}`);
+        // Разбиваем текст на части если он слишком длинный
+        const messagePrefix = `📊 Результат анализа чата ${chatId}:\n\n`;
+        const fullMessage = messagePrefix + finalText;
+        const chunks = splitMessage(fullMessage, 4000);
+
+        console.log(`📤 Отправка ${chunks.length} сообщений...`);
+
+        // Отправляем все части
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+
+            // Добавляем индикатор части если сообщений больше одного
+            const partIndicator = chunks.length > 1 ? `\n\n[Часть ${i + 1}/${chunks.length}]` : '';
+
+            await ctx.reply(chunk + partIndicator);
+
+            // Небольшая задержка между сообщениями чтобы не словить rate limit
+            if (i < chunks.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
+
+        console.log('✅ Все части отправлены');
 
     } catch (error) {
         console.error('❌ Ошибка при суммаризации (тест):', error);
@@ -1304,6 +1417,25 @@ botEvents.on('game_finished', async (data) => {
 });
 
 console.log('✅ Обработчик событий игры подключен (EventEmitter + HTTP API)');
+
+// ========================================
+// ИГРА "БУНКЕР"
+// ========================================
+
+// Команды для игры в бункер
+bot.command('randombunker', handleRandomBunker);
+bot.command('myrole', handleMyRole);
+bot.command('role', handleRole);
+bot.command('vote', handleVote);
+bot.command('endvote', handleEndVote);
+bot.command('stopbunker', handleStopBunker);
+
+// Обработчики callback-кнопок
+bot.action(/^bunker_join:(.+)$/, handleJoin);
+bot.action(/^bunker_leave:(.+)$/, handleLeave);
+bot.action(/^bunker_vote:(.+):(.+)$/, handleVoteCallback);
+
+console.log('✅ Команды игры "Бункер" зарегистрированы');
 
 // ========================================
 // ЗАПУСК БОТА

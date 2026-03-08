@@ -84,3 +84,6 @@ dump.rdb
 # MongoDB local
 data/
 mongodb/
+
+# Test bots (локальное тестирование)
+summarizetest-bot/

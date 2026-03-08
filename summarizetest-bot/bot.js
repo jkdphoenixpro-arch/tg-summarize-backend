@@ -1,6 +1,6 @@
 import { Telegraf } from 'telegraf';
 import { Groq } from 'groq-sdk';
-import { TelegramClient } from 'telegram';
+import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import dotenv from 'dotenv';
 import { encoding_for_model } from 'tiktoken';
@@ -210,6 +210,7 @@ bot.command('start', async (ctx) => {
         '👋 Привет! Это тестовый бот для команды /summarizetest\n\n' +
         '📝 Доступные команды:\n' +
         '/summarizetest - Анализ сообщений из целевого чата\n' +
+        '/edittag - Циклическая смена тегов (мирон → топ1 → игрок)\n' +
         '/status - Проверка статуса\n\n' +
         '⚙️ Настройка:\n' +
         '1. Укажи TARGET_CHAT_ID в .env\n' +
@@ -231,6 +232,124 @@ bot.command('status', async (ctx) => {
     status += `💾 Сообщений в памяти: ${chatMessages.size > 0 ? Array.from(chatMessages.values()).reduce((sum, msgs) => sum + msgs.length, 0) : 0}\n`;
 
     await ctx.reply(status);
+});
+
+// Команда /edittag - циклическая смена member tag
+bot.command('edittag', async (ctx) => {
+    // Работает только в личке
+    if (ctx.chat.type !== 'private') {
+        return ctx.reply('❌ Эта команда работает только в личных сообщениях');
+    }
+
+    // Устанавливаем владельца при первом использовании
+    if (!ownerId) {
+        ownerId = ctx.from.id;
+        console.log(`✅ Владелец установлен: ${ctx.from.id} (${ctx.from.username || ctx.from.first_name})`);
+    }
+
+    const chatId = targetChatId;
+
+    if (!chatId) {
+        return ctx.reply('❌ TARGET_CHAT_ID не указан в .env');
+    }
+
+    try {
+        // Инициализируем userbot если еще не подключен
+        if (!userbot) {
+            userbot = await initUserbot();
+
+            if (!userbot) {
+                return ctx.reply(
+                    '❌ Не могу подключиться к Telegram\n\n' +
+                    '💡 Убедись что:\n' +
+                    '1. TELEGRAM_API_ID и TELEGRAM_API_HASH указаны в .env\n' +
+                    '2. TELEGRAM_SESSION указана (запусти npm run userbot)\n' +
+                    '3. Ты участник целевого чата'
+                );
+            }
+        }
+
+        // Получаем информацию о userbot
+        const me = await userbot.getMe();
+        console.log(`✅ Userbot ID: ${me.id}`);
+
+        // Получаем entity канала
+        let channelEntity;
+        try {
+            channelEntity = await userbot.getEntity(chatId);
+            console.log('✅ Entity канала получен');
+        } catch (error) {
+            console.error('❌ Ошибка получения entity канала:', error.message);
+            return ctx.reply('❌ Не могу получить информацию о канале');
+        }
+
+        await ctx.reply(`🏷️ Запускаю циклическую смену тегов для ${me.firstName}...\nТеги: мирон → топ1 → игрок (каждые 2 секунды)\n\n💡 Используется MTProto API`);
+        console.log('\n=== КОМАНДА /edittag ===');
+        console.log(`👤 Пользователь: ${ctx.from.username || ctx.from.first_name} (${ctx.from.id})`);
+        console.log(`🤖 Userbot: ${me.firstName} (${me.id})`);
+        console.log(`🎯 Целевой чат: ${chatId}`);
+
+        const tags = ['мирон', 'топ1', 'игрок'];
+        const colors = [0, 1, 2]; // Разные цвета для тегов
+        let currentIndex = 0;
+
+        // Бесконечный цикл смены тегов
+        const intervalId = setInterval(async () => {
+            try {
+                const currentTag = tags[currentIndex];
+                const currentColor = colors[currentIndex];
+                
+                // Пробуем использовать channels.UpdateColor для изменения цвета участника
+                try {
+                    await userbot.invoke(
+                        new Api.channels.UpdateColor({
+                            channel: channelEntity,
+                            forProfile: false,
+                            color: currentColor,
+                            backgroundEmojiId: BigInt(0)
+                        })
+                    );
+                    console.log(`✅ Цвет изменен на: ${currentColor} (тег: ${currentTag})`);
+                } catch (colorError) {
+                    console.log('⚠️ UpdateColor не сработал:', colorError.message);
+                    
+                    // Альтернатива - пробуем через Bot API если бот добавлен
+                    const response = await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/setChatMemberTag`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            chat_id: chatId,
+                            user_id: me.id,
+                            tag: currentTag
+                        })
+                    });
+
+                    const result = await response.json();
+                    
+                    if (result.ok) {
+                        console.log(`✅ Member Tag изменен через Bot API на: ${currentTag}`);
+                    } else {
+                        console.error('❌ Ошибка Bot API:', result.description);
+                        throw new Error(`Bot API: ${result.description}`);
+                    }
+                }
+                
+                // Переходим к следующему тегу
+                currentIndex = (currentIndex + 1) % tags.length;
+                
+            } catch (error) {
+                console.error('❌ Ошибка при смене тега:', error);
+                clearInterval(intervalId);
+                await ctx.reply(`❌ Ошибка при смене тега. Цикл остановлен.\n\n${error.message}\n\n💡 Для работы через Bot API:\n1. Добавь бота в группу\n2. Сделай бота админом с правом "Manage Tags"`);
+            }
+        }, 2000); // Каждые 2 секунды
+        
+    } catch (error) {
+        console.error('❌ Ошибка при запуске /edittag:', error);
+        await ctx.reply('❌ Ошибка при запуске команды');
+    }
 });
 
 // Команда /summarizetest
@@ -376,6 +495,7 @@ bot.launch()
         console.log('   /start - Приветствие');
         console.log('   /status - Статус бота');
         console.log('   /summarizetest - Анализ чата');
+        console.log('   /edittag - Циклическая смена тегов');
     })
     .catch(err => {
         console.error('❌ Ошибка запуска бота:', err);

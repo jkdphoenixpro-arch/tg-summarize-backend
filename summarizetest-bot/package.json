@@ -8,7 +8,11 @@
     "start": "node bot.js",
     "dev": "node --watch bot.js"
   },
-  "keywords": ["telegram", "bot", "summarize"],
+  "keywords": [
+    "telegram",
+    "bot",
+    "summarize"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
