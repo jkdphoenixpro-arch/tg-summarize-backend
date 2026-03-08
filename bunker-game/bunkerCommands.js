@@ -47,20 +47,23 @@ function formatGameInfo(game) {
 
 // Команда /randombunker - создание новой игры
 export async function handleRandomBunker(ctx) {
-    console.log('🎮 Команда /randombunker получена');
-    console.log('📍 Тип чата:', ctx.chat.type);
-    console.log('👤 От пользователя:', ctx.from.username || ctx.from.first_name);
-    
-    // Работает только в группах
-    if (ctx.chat.type === 'private') {
-        return ctx.reply('❌ Эта команда работает только в группах');
-    }
-    
-    const chatId = ctx.chat.id;
-    console.log('🆔 ID чата:', chatId);
-    
-    const game = await createGame(chatId);
-    console.log('✅ Игра создана:', game.gameId);
+    try {
+        console.log('🎮 Команда /randombunker получена');
+        console.log('📍 Тип чата:', ctx.chat.type);
+        console.log('👤 От пользователя:', ctx.from.username || ctx.from.first_name);
+        
+        // Работает только в группах
+        if (ctx.chat.type === 'private') {
+            console.log('⚠️ Попытка запуска в личке');
+            return ctx.reply('❌ Эта команда работает только в группах');
+        }
+        
+        const chatId = ctx.chat.id;
+        console.log('🆔 ID чата:', chatId);
+        
+        console.log('🔄 Создаю игру...');
+        const game = await createGame(chatId);
+        console.log('✅ Игра создана:', game.gameId);
     
     const keyboard = Markup.inlineKeyboard([
         [Markup.button.callback('✅ Присоединиться', `bunker_join:${game.gameId}`)],
@@ -100,6 +103,16 @@ export async function handleRandomBunker(ctx) {
     }, 5 * 60 * 1000); // 5 минут
     
     recruitTimers.set(game.gameId, timerId);
+    
+    } catch (error) {
+        console.error('❌ Ошибка в handleRandomBunker:', error);
+        console.error('Stack:', error.stack);
+        try {
+            await ctx.reply('❌ Произошла ошибка при создании игры. Попробуйте ещё раз.');
+        } catch (replyError) {
+            console.error('❌ Не удалось отправить сообщение об ошибке:', replyError);
+        }
+    }
 }
 
 // Обработка кнопки "Присоединиться"
