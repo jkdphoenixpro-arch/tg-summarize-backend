@@ -19,6 +19,12 @@ import {
     handleStopBunker
 } from './bunker-game/bunkerCommands.js';
 
+console.log('✅ Bunker commands импортированы:', {
+    handleRandomBunker: typeof handleRandomBunker,
+    handleJoin: typeof handleJoin,
+    handleLeave: typeof handleLeave
+});
+
 dotenv.config();
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -1419,11 +1425,42 @@ botEvents.on('game_finished', async (data) => {
 console.log('✅ Обработчик событий игры подключен (EventEmitter + HTTP API)');
 
 // ========================================
+// ОТЛАДКА: Логирование всех команд
+// ========================================
+
+bot.use(async (ctx, next) => {
+    if (ctx.message && ctx.message.text && ctx.message.text.startsWith('/')) {
+        console.log('📨 Получена команда:', ctx.message.text);
+        console.log('👤 От:', ctx.from.username || ctx.from.first_name);
+        console.log('💬 Чат:', ctx.chat.type, ctx.chat.id);
+    }
+    return next();
+});
+
+console.log('✅ Middleware для логирования команд установлен');
+
+// ========================================
 // ИГРА "БУНКЕР"
 // ========================================
 
 // Команды для игры в бункер
-bot.command('randombunker', handleRandomBunker);
+console.log('🔧 Регистрирую команду randombunker...');
+bot.command('randombunker', async (ctx) => {
+    console.log('🎯 КОМАНДА RANDOMBUNKER ВЫЗВАНА!');
+    console.log('📍 Context:', {
+        chatType: ctx.chat.type,
+        chatId: ctx.chat.id,
+        userId: ctx.from.id,
+        username: ctx.from.username
+    });
+    try {
+        await handleRandomBunker(ctx);
+    } catch (error) {
+        console.error('💥 КРИТИЧЕСКАЯ ОШИБКА в randombunker:', error);
+        console.error('Stack:', error.stack);
+    }
+});
+console.log('✅ Команда randombunker зарегистрирована');
 bot.command('myrole', handleMyRole);
 bot.command('role', handleRole);
 bot.command('vote', handleVote);
