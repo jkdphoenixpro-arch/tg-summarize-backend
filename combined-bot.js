@@ -1445,21 +1445,7 @@ console.log('✅ Обработчик событий игры подключен
 
 // Команды для игры в бункер
 console.log('🔧 Регистрирую команду randombunker...');
-bot.command('randombunker', async (ctx) => {
-    console.log('🎯 КОМАНДА RANDOMBUNKER ВЫЗВАНА!');
-    console.log('📍 Context:', {
-        chatType: ctx.chat.type,
-        chatId: ctx.chat.id,
-        userId: ctx.from.id,
-        username: ctx.from.username
-    });
-    try {
-        await handleRandomBunker(ctx);
-    } catch (error) {
-        console.error('💥 КРИТИЧЕСКАЯ ОШИБКА в randombunker:', error);
-        console.error('Stack:', error.stack);
-    }
-});
+bot.command('randombunker', handleRandomBunker);
 console.log('✅ Команда randombunker зарегистрирована');
 bot.command('myrole', handleMyRole);
 bot.command('role', handleRole);
